@@ -74,14 +74,21 @@ import. New scripts: `TakIdentity`, `SelfPresence`, `TakCertStore`,
 
 ## GitHub Release APK (CI)
 
-Release builds run on a **self-hosted Windows runner** with Unity installed:
+GitHub Actions (GameCI) builds `TAKXR.apk` and attaches it to a Release.
+
+One-time: add these repo secrets (Unity personal license):
+[Activation](https://game.ci/docs/github/activation) →
+[AndroidXRTAK secrets](https://github.com/CopIXus/AndroidXRTAK/settings/secrets/actions)
+
+| Secret | Value |
+|---|---|
+| `UNITY_LICENSE` | Contents of `Unity_lic.ulf` (Unity Hub → Preferences → Licenses → Add personal) |
+| `UNITY_EMAIL` | Unity account email |
+| `UNITY_PASSWORD` | Unity account password |
+
+Then:
 
 ```powershell
-# One-time on your Unity build PC:
-.\ci\setup-github-runner.ps1 -Token <token-from-github-runners-new>
-# keep .\run.cmd running (or install as a service)
-
-# Publish:
 git tag v0.1.2
 git push origin v0.1.2
 ```

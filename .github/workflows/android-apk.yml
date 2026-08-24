@@ -1,16 +1,9 @@
-﻿# CI APK artifact (no Release). Same Unity secrets as release-apk.yml.
+﻿# CI APK artifact (no GitHub Release). Same Unity secrets as release-apk.yml.
+# Manual only — do not burn a Unity license on every push.
 name: Android APK
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "Assets/**"
-      - "Packages/**"
-      - "ProjectSettings/**"
-      - "ci/**"
-      - ".github/workflows/android-apk.yml"
 
 jobs:
   secret-scan:
@@ -27,6 +20,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: true
+
+      - name: Require Unity license secrets
+        shell: bash
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          if [ -z "$UNITY_LICENSE" ] || [ -z "$UNITY_EMAIL" ] || [ -z "$UNITY_PASSWORD" ]; then
+            echo "::error::Add UNITY_LICENSE, UNITY_EMAIL, and UNITY_PASSWORD secrets."
+            echo "::error::https://game.ci/docs/github/activation"
+            exit 1
+          fi
+
+      - name: Fetch Cesium for Unity tarball
+        shell: pwsh
+        run: ./ci/fetch-cesium.ps1
 
       - uses: jlumbroso/free-disk-space@v1.3.1
 
@@ -45,7 +55,13 @@ jobs:
           unityVersion: 6000.3.20f1
           targetPlatform: Android
           androidExportType: androidPackage
-          customBuildMethod: TakXr.Editor.TakXrEditorMenu.BuildAndroidApk
+          buildMethod: TakXr.Editor.TakXrEditorMenu.BuildAndroidApk
+          buildsPath: Builds
+          buildName: TAKXR
+
+      - name: Locate APK
+        shell: pwsh
+        run: ./ci/locate-apk.ps1 -Dest Builds/Android/TAKXR.apk
 
       - run: ./ci/verify-apk-no-secrets.ps1 -ApkPath Builds/Android/TAKXR.apk
         shell: pwsh

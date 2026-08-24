@@ -1,14 +1,8 @@
-﻿# Publish a GitHub Release with TAKXR.apk when a version tag is pushed.
-# Requires a self-hosted Windows runner with Unity 6000.3 + Android Build Support.
+﻿# Build TAKXR.apk on GitHub Actions (GameCI) and attach to a Release.
+# Requires repo secrets: UNITY_EMAIL, UNITY_PASSWORD, UNITY_LICENSE
+# Activate: https://game.ci/docs/github/activation
 #
-# Tag example:
-#   git tag v0.1.2
-#   git push origin v0.1.2
-#
-# Or: Actions → Release APK → Run workflow
-#
-# Public APKs are built from a clean checkout (no local-config.json / takclient.p12).
-# Users add their own TAK server + cert on device (Servers panel / QR / Import cert).
+# Trigger: push tag v*  OR  Actions → Release APK → Run workflow
 
 name: Release APK
 
@@ -31,45 +25,51 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify no server secrets
+      - name: Verify no server secrets in repo
         shell: pwsh
         run: ./ci/verify-no-secrets.ps1
 
   build:
     needs: secret-scan
-    runs-on: [self-hosted, Windows, Unity]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
 
-      - name: Guard — no certs or local-config in workspace
+      - name: Guard — no certs in checkout
         shell: pwsh
         run: |
-          $bad = @()
-          if (Test-Path "Assets/StreamingAssets/local-config.json") { $bad += "local-config.json" }
-          $bad += @(Get-ChildItem "Assets/StreamingAssets" -Filter "*.p12" -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
-          if ($bad.Count -gt 0) {
-            throw "Refusing to build release APK with secrets present: $($bad -join ', ')"
+          if (Test-Path "Assets/StreamingAssets/local-config.json") { throw "local-config.json present" }
+          if (Get-ChildItem "Assets/StreamingAssets" -Filter "*.p12" -ErrorAction SilentlyContinue) {
+            throw "*.p12 present in StreamingAssets"
           }
-          Write-Host "Clean checkout — safe for public APK."
 
-      - name: Fetch Cesium for Unity tarball
-        shell: pwsh
-        run: ./ci/fetch-cesium.ps1
+      - name: Free disk space (Android builds are large)
+        uses: jlumbroso/free-disk-space@v1.3.1
 
-      - name: Ensure Android SDK components
-        shell: pwsh
-        run: ./ci/ensure-android-sdk.ps1
-
-      - name: Build APK
-        shell: pwsh
-        run: ./ci/build-android.ps1
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/cache@v4
         with:
-          name: TAKXR-apk
-          path: Builds/Android/TAKXR.apk
-          if-no-files-found: error
+          path: Library
+          key: Library-Android-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: Library-Android-
+
+      - name: Build Android APK (Unity 6000.3.20f1)
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        with:
+          unityVersion: 6000.3.20f1
+          targetPlatform: Android
+          androidExportType: androidPackage
+          customBuildMethod: TakXr.Editor.TakXrEditorMenu.BuildAndroidApk
+
+      - name: Verify APK has no embedded cert
+        shell: pwsh
+        run: ./ci/verify-apk-no-secrets.ps1 -ApkPath Builds/Android/TAKXR.apk
 
       - name: Resolve release tag
         id: meta
@@ -82,7 +82,6 @@ jobs:
             if (-not $tag.StartsWith("v")) { $tag = "v$tag" }
           }
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Release tag: $tag"
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
 
@@ -97,8 +96,8 @@ jobs:
           body: |
             Samsung Galaxy XR / Android XR APK (`us.copix.takxr`).
 
-            This build has **no enrolled TAK cert or server hostname** — add your
-            server in-headset (Servers panel / QR) and import a client P12.
+            No enrolled TAK cert or server hostname in this build — configure in-headset
+            (Servers panel / QR) and import your client P12.
 
             ```powershell
             adb install -r TAKXR.apk

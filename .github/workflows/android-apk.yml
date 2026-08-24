@@ -1,4 +1,4 @@
-﻿# CI APK build on a self-hosted Windows + Unity runner (artifact only, no Release).
+﻿# CI APK artifact (no Release). Same Unity secrets as release-apk.yml.
 name: Android APK
 
 on:
@@ -7,7 +7,7 @@ on:
     branches: [main]
     paths:
       - "Assets/**"
-      - "Packages/manifest.json"
+      - "Packages/**"
       - "ProjectSettings/**"
       - "ci/**"
       - ".github/workflows/android-apk.yml"
@@ -17,40 +17,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify no server secrets
+      - run: ./ci/verify-no-secrets.ps1
         shell: pwsh
-        run: ./ci/verify-no-secrets.ps1
 
   build:
     needs: secret-scan
-    runs-on: [self-hosted, Windows, Unity]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
-      - name: Guard — no certs or local-config in workspace
+      - uses: jlumbroso/free-disk-space@v1.3.1
+
+      - uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Android-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: Library-Android-
+
+      - uses: game-ci/unity-builder@v4
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        with:
+          unityVersion: 6000.3.20f1
+          targetPlatform: Android
+          androidExportType: androidPackage
+          customBuildMethod: TakXr.Editor.TakXrEditorMenu.BuildAndroidApk
+
+      - run: ./ci/verify-apk-no-secrets.ps1 -ApkPath Builds/Android/TAKXR.apk
         shell: pwsh
-        run: |
-          if (Test-Path "Assets/StreamingAssets/local-config.json") {
-            throw "local-config.json must not be present in CI workspace"
-          }
-          if (Get-ChildItem "Assets/StreamingAssets" -Filter "*.p12" -ErrorAction SilentlyContinue) {
-            throw "*.p12 must not be present in CI workspace"
-          }
 
-      - name: Fetch Cesium for Unity tarball
-        shell: pwsh
-        run: ./ci/fetch-cesium.ps1
-
-      - name: Ensure Android SDK components
-        shell: pwsh
-        run: ./ci/ensure-android-sdk.ps1
-
-      - name: Build APK
-        shell: pwsh
-        run: ./ci/build-android.ps1
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: TAKXR-apk
           path: Builds/Android/TAKXR.apk

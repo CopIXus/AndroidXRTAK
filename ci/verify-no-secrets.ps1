@@ -43,7 +43,7 @@ if ($files.Count -eq 0) {
 }
 
 foreach ($rel in $files) {
-    if ($rel -match 'verify-no-secrets\.ps1$' -or $rel -match 'local-config\.json\.example$') { continue }
+    if ($rel -match 'verify-no-secrets\.ps1$' -or $rel -match 'verify-apk-no-secrets\.ps1$' -or $rel -match 'local-config\.json\.example$') { continue }
     $full = Join-Path $Root ($rel -replace '/','\')
     if (Test-FileForSecrets $full $rel) { $failed = $true }
 }

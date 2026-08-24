@@ -1,0 +1,27 @@
+{
+  "dependencies": {
+    "com.cesium.unity": "file:com.cesium.unity-1.24.0.tgz",
+    "com.unity.inputsystem": "1.14.0",
+    "com.unity.render-pipelines.universal": "17.0.4",
+    "com.unity.ugui": "2.0.0",
+    "com.unity.xr.androidxr-openxr": "1.0.0",
+    "com.unity.xr.hands": "1.5.1",
+    "com.unity.xr.interaction.toolkit": "3.0.8",
+    "com.unity.xr.management": "4.5.0",
+    "com.unity.xr.openxr": "1.14.3",
+    "com.unity.modules.androidjni": "1.0.0",
+    "com.unity.modules.animation": "1.0.0",
+    "com.unity.modules.audio": "1.0.0",
+    "com.unity.modules.imageconversion": "1.0.0",
+    "com.unity.modules.imgui": "1.0.0",
+    "com.unity.modules.jsonserialize": "1.0.0",
+    "com.unity.modules.physics": "1.0.0",
+    "com.unity.modules.ui": "1.0.0",
+    "com.unity.modules.uielements": "1.0.0",
+    "com.unity.modules.unitywebrequest": "1.0.0",
+    "com.unity.modules.unitywebrequesttexture": "1.0.0",
+    "com.unity.modules.video": "1.0.0",
+    "com.unity.modules.vr": "1.0.0",
+    "com.unity.modules.xr": "1.0.0"
+  }
+}

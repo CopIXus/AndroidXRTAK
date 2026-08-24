@@ -1,0 +1,2 @@
+-keep class us.copix.takxr.video.** { *; }
+-dontwarn androidx.media3.**

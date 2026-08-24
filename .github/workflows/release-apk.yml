@@ -1,0 +1,40 @@
+﻿# Release tags are allowed; APK builds stay local (never publish enrolled certs).
+name: Release APK
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify no server secrets
+        shell: pwsh
+        run: ./ci/verify-no-secrets.ps1
+
+  release-notes:
+    needs: secret-scan
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release (source only)
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            Source release only. Build and sideload APK locally:
+
+            ```powershell
+            copy Assets\StreamingAssets\local-config.json.example Assets\StreamingAssets\local-config.json
+            # fill in local-config.json + place takclient.p12
+            .\ci\build-android.ps1 -UseLocalMirror
+            .\ci\sideload-apk.ps1
+            ```

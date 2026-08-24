@@ -1,0 +1,30 @@
+{
+  "name": "TakXr.Runtime",
+  "rootNamespace": "TakXr",
+  "references": [
+    "Unity.InputSystem",
+    "Unity.XR.CoreUtils",
+    "Unity.XR.Management",
+    "Unity.XR.Hands"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [
+    {
+      "name": "com.cesium.unity",
+      "expression": "",
+      "define": "CESIUM_AVAILABLE"
+    },
+    {
+      "name": "com.unity.xr.hands",
+      "expression": "",
+      "define": "TAKXR_HAS_XR_HANDS"
+    }
+  ],
+  "noEngineReferences": false
+}

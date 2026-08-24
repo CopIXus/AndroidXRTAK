@@ -1,0 +1,9 @@
+﻿{
+  "takHost": "your-tak-server.example.com",
+  "takPort": 8089,
+  "takMartiPort": 8443,
+  "takEnrollPort": 8446,
+  "takClientP12Password": "your-p12-password",
+  "takClientP12": "takclient.p12",
+  "backendBaseUrl": ""
+}

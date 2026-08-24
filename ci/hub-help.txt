@@ -1,0 +1,86 @@
+﻿
+Unity Hub.exe : [2464:0724/163228.172:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: Access is 
+denied. (0x5)
+At C:\Users\amosh\AppData\Local\Temp\ps-script-3f9caa46-7387-4076-acf6-4e520222d345.ps1:80 char:1
++ & "C:\Program Files\Unity Hub\Unity Hub.exe" -- --headless help 2>&1  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([2464:0724/1632...s denied. (0x5):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[2464:0724/163228.172:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: Access is denied. (0x5)
+[2464:0724/163228.172:ERROR:net\disk_cache\cache_util_win.cc:25] Unable to move the cache: Access is denied. (0x5)
+[2464:0724/163228.188:ERROR:net\disk_cache\disk_cache.cc:284] Unable to create cache
+[2464:0724/163228.188:ERROR:gpu\ipc\host\gpu_disk_cache.cc:737] Gpu Cache Creation failed: -2
+[2464:0724/163228.188:ERROR:net\disk_cache\disk_cache.cc:284] Unable to create cache
+[2464:0724/163228.188:ERROR:gpu\ipc\host\gpu_disk_cache.cc:737] Gpu Cache Creation failed: -2
+[2464:0724/163228.188:ERROR:net\disk_cache\disk_cache.cc:284] Unable to create cache
+[2464:0724/163228.188:ERROR:gpu\ipc\host\gpu_disk_cache.cc:737] Gpu Cache Creation failed: -2
+[install-state] downloads-store: reaped stale row uid=6000.5.5f1-x86_64 pid=29004 (dead=true, expired=true)
+[install-state] downloads-store: pruned 14 terminal row(s) older than 600000ms
+Global flags:
+  --errors     will enable hidden error logging
+Commands:
+  editors
+    description: list the releases and installed editors
+    alias: e
+    example: "Unity Hub.exe" -- --headless editors -r
+    options:
+      [default]		list of available releases and installed editors on your machine combined
+      --releases|-r 	only list of available releases promoted by Unity
+      --installed|-i 	only list of installed editors on your machine
+      --json|-j 		output as JSON format
+      --add <path>      locating and associating an editor from a stipulated path
+
+  install-path
+    description: set/get the path where the Unity editors will be installed
+    alias: ip
+    example: "Unity Hub.exe" -- --headless ip -s "%ProgramFiles%\Unity\Hub\Editor"
+    options:
+      --set|-s <path> 	set the install path to the given path
+      --get|-g 			returns the install path
+
+  install
+    description:
+      installs a new editor either from the releases list or archive
+    alias: i
+    example: "Unity Hub.exe" -- --headless install --version 2019.1.11f1 --changeset 9b001d489a54
+    options:
+      --version|-v <version> 		editor version to be installed (e.g. 2019.1.11f1) - required
+      --changeset|-c 	<changeset> changeset of the editor if it is not in the release list (e.g. 9b001d489a54)
+                    - required if the version is not in the releases. see editors -r
+      --module|-m <moduleid>		see install-modules for more information
+      --childModules|--cm     automatically installs all child modules of selected modules
+
+  install-modules
+    description:
+      download and install a module (e.g. build support) to an installed editor
+    alias: im
+      example: "Unity Hub.exe" -- --headless install-modules --version 2019.1.11f1 -m ios android
+    options:
+      --version|-v <version> 	version of the editor to add the module to - required
+      --module|-m  <moduleid> the module id. The followings are the available values depending on version. You can specify multiple values, separated by spaces.
+                  For a full list, please visit https://docs.unity3d.com/hub/manual/HubCLI.html
+
+                  Android Build Support: android
+                  Android SDK & NDK Tools: android-sdk-ndk-tools
+                  OpenJDK: android-open-jdk
+                  Microsoft Visual Studio Community 2017/2019: visualstudio
+                  iOS Build Support: ios
+                  tvOS Build Support: appletv
+                  Linux Build Support: linux
+                  Linux Build Support (Mono): linux-mono
+                  Linux Build Support (IL2CPP): linux-il2cpp
+                  Mac Build Support (Mono): mac-mono
+                  Windows Build Support (IL2CPP): windows-il2cpp
+                  Universal Windows Platform Build Support: universal-windows-platform
+                  UWP Build Support (IL2CPP): uwp-il2cpp
+                  UWP Build Support (.NET): uwp-.net
+                  WebGL Build Support: webgl
+                  Lumin OS (Magic Leap) Build Support: lumin
+                  Facebook Gameroom: facebookgameroom
+                  Facebook Gameroom Build Support: facebook-games
+                  Vuforia Augmented Reality Support: vuforia-ar
+                  Documentation: documentation
+                  Language packs: language-ja, language-ko, language-zh-cn, language-zh-hant, language-zh-hans
+      --childModules|--cm     automatically installs all child modules of selected modules
+

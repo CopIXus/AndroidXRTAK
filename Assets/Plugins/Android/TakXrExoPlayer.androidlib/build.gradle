@@ -1,0 +1,22 @@
+apply plugin: 'com.android.library'
+
+dependencies {
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer-rtsp:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer-hls:1.4.1'
+    implementation 'androidx.media3:media3-common:1.4.1'
+}
+
+android {
+    namespace "us.copix.takxr.video"
+    compileSdkVersion 34
+    defaultConfig {
+        minSdkVersion 28
+        targetSdkVersion 34
+        consumerProguardFiles 'proguard-rules.pro'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}

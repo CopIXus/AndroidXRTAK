@@ -1,0 +1,21 @@
+﻿# APK builds are local-only (enrolled certs must not ship from CI).
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "Assets/**"
+      - "Packages/manifest.json"
+      - "ProjectSettings/**"
+      - "ci/**"
+      - ".github/**"
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify no server secrets
+        shell: pwsh
+        run: ./ci/verify-no-secrets.ps1

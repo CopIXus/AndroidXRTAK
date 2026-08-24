@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 01a85b4f562772c4aadeaf738534a098, type: 3}
+  m_Name: AppConfig
+  m_EditorClassIdentifier: TakXr.Runtime::TakXr.Core.AppConfig
+  backendBaseUrl: 
+  cesiumIonToken: 
+  mapRadiusMeters: 160934.4
+  clusterExitMeters: 144841
+  clusterGridDegrees: 0.5
+  clusterMinCount: 2
+  showMap: 1
+  allowHighAltitudeCots: 0
+  tilesetMaximumScreenSpaceError: 80
+  tilesetMovingScreenSpaceError: 120
+  tilesetMaximumSimultaneousTileLoads: 4
+  tilesetMaximumCachedBytes: 104857600
+  originLat: 36.29571
+  originLon: -82.19937
+  originAlt: 480
+  startCameraHeightMeters: 420
+  startCameraBackMeters: 520

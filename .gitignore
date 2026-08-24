@@ -1,4 +1,4 @@
-/[Ll]ibrary/
+﻿/[Ll]ibrary/
 /[Tt]emp/
 /[Oo]bj/
 /[Bb]uild/
@@ -49,4 +49,3 @@ secrets/
 
 Assets/StreamingAssets/*.p12.meta
 
-Assets/StreamingAssets/*.p12.meta

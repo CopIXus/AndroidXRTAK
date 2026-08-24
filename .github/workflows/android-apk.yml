@@ -1,15 +1,16 @@
-﻿# APK builds are local-only (enrolled certs must not ship from CI).
+﻿# CI APK build on a self-hosted Windows + Unity runner (artifact only, no Release).
 name: Android APK
 
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - "Assets/**"
       - "Packages/manifest.json"
       - "ProjectSettings/**"
       - "ci/**"
-      - ".github/**"
+      - ".github/workflows/android-apk.yml"
 
 jobs:
   secret-scan:
@@ -19,3 +20,38 @@ jobs:
       - name: Verify no server secrets
         shell: pwsh
         run: ./ci/verify-no-secrets.ps1
+
+  build:
+    needs: secret-scan
+    runs-on: [self-hosted, Windows, Unity]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — no certs or local-config in workspace
+        shell: pwsh
+        run: |
+          if (Test-Path "Assets/StreamingAssets/local-config.json") {
+            throw "local-config.json must not be present in CI workspace"
+          }
+          if (Get-ChildItem "Assets/StreamingAssets" -Filter "*.p12" -ErrorAction SilentlyContinue) {
+            throw "*.p12 must not be present in CI workspace"
+          }
+
+      - name: Fetch Cesium for Unity tarball
+        shell: pwsh
+        run: ./ci/fetch-cesium.ps1
+
+      - name: Ensure Android SDK components
+        shell: pwsh
+        run: ./ci/ensure-android-sdk.ps1
+
+      - name: Build APK
+        shell: pwsh
+        run: ./ci/build-android.ps1
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TAKXR-apk
+          path: Builds/Android/TAKXR.apk
+          if-no-files-found: error

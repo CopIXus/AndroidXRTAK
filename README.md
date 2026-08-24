@@ -7,7 +7,7 @@ default **off**).
 
 Sibling of `T:\CopIX\TAKXR`. Product brief: [`../TAKXR/docs/XR-APK-SPIKE.md`](../TAKXR/docs/XR-APK-SPIKE.md).
 
-**GitHub:** [CopIXus/AndroidXRTAK](https://github.com/CopIXus/AndroidXRTAK) — source only; APK builds are local.
+**GitHub:** [CopIXus/AndroidXRTAK](https://github.com/CopIXus/AndroidXRTAK) — public source + Release APKs (no enrolled cert in the published APK).
 
 ## Stack
 

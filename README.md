@@ -71,9 +71,25 @@ Output: `Builds/Android/TAKXR.apk` (`us.copix.takxr`).
 import. New scripts: `TakIdentity`, `SelfPresence`, `TakCertStore`,
 `AppLifecycleHost`, `XrSettingsPanel`, `IconResolver`.
 
+
+## GitHub Release APK (CI)
+
+Release builds run on a **self-hosted Windows runner** with Unity installed:
+
+```powershell
+# One-time on your Unity build PC:
+.\ci\setup-github-runner.ps1 -Token <token-from-github-runners-new>
+# keep .\run.cmd running (or install as a service)
+
+# Publish:
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+Or Actions → **Release APK** → Run workflow. Public Release APKs have no TAK cert baked in.
 ## Sideload to Galaxy XR
 
-Build locally (APKs are not published from GitHub — they contain enrolled certs):
+Download `TAKXR.apk` from [Releases](https://github.com/CopIXus/AndroidXRTAK/releases), or build locally:
 
 ```powershell
 .\ci\build-android.ps1 -UseLocalMirror

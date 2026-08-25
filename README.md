@@ -1,4 +1,8 @@
-﻿# TAKXR Android XR (Samsung Galaxy XR)
+﻿<p align="center">
+  <img src="docs/logo.png" alt="XRTAK" width="280">
+</p>
+
+# TAKXR Android XR (Samsung Galaxy XR)
 
 Native Unity 6 + OpenXR Android XR APK â€” a standalone VR ATAK/COP client.
 Connects **directly** to a TAK Server (CoT TLS + Marti REST) with an enrolled
@@ -8,6 +12,10 @@ default **off**).
 Sibling of `T:\CopIX\TAKXR`. Product brief: [`../TAKXR/docs/XR-APK-SPIKE.md`](../TAKXR/docs/XR-APK-SPIKE.md).
 
 **GitHub:** [CopIXus/AndroidXRTAK](https://github.com/CopIXus/AndroidXRTAK) — public source + Release APKs (no enrolled cert in the published APK).
+
+<p align="center">
+  <img src="docs/headset-view.png" alt="TAKXR on Samsung Galaxy XR" width="900">
+</p>
 
 ## Stack
 

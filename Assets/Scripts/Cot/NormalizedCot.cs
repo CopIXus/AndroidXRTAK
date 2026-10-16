@@ -155,6 +155,25 @@ namespace TakXr.Cot
     }
 
     [Serializable]
+    public class CotChat
+    {
+        public string id;
+        public string chatroom;
+        public string senderCallsign;
+        public string groupOwner;
+        public string messageId;
+        public string parent;
+    }
+
+    [Serializable]
+    public class CotEmergency
+    {
+        public string type;
+        public string callsign;
+        public bool cancel;
+    }
+
+    [Serializable]
     public class CotDetail
     {
         public string remarks;
@@ -179,6 +198,10 @@ namespace TakXr.Cot
         public bool closed;
         // Guard with major > 0 for the same reason.
         public CotEllipse ellipse;
+        // GeoChat metadata (<__chat .../>)
+        public CotChat chat;
+        // Emergency beacon (<emergency type="..." cancel="..."/>)
+        public CotEmergency emergency;
     }
 
     [Serializable]
@@ -212,6 +235,14 @@ namespace TakXr.Cot
                 return parts.Length >= 3 && parts[0] == "a" && parts[2] == "A";
             }
         }
+
+        public bool IsChatMessage =>
+            (!string.IsNullOrEmpty(type) && type.StartsWith("b-t-f")) ||
+            !string.IsNullOrEmpty(detail?.chat?.chatroom);
+
+        public bool IsEmergency =>
+            (!string.IsNullOrEmpty(type) && (type.StartsWith("b-a-o") || type.StartsWith("b-r-f-h-c"))) ||
+            (!string.IsNullOrEmpty(detail?.emergency?.type) && !detail.emergency.cancel);
     }
 
     [Serializable]

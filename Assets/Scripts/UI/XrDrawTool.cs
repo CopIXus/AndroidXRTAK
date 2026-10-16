@@ -187,6 +187,7 @@ namespace TakXr.UI
             var hits = Physics.RaycastAll(origin, fwd, 8f, ~0, QueryTriggerInteraction.Collide);
             foreach (var hit in hits)
             {
+                if (hit.collider != null && hit.collider.isTrigger) return true;
                 if (hit.transform.GetComponentInParent<XrChromeHud>() != null) return true;
                 if (hit.transform.GetComponentInParent<XrLayersPanel>() != null) return true;
                 if (hit.transform.GetComponentInParent<XrInfoPanel>() != null) return true;
@@ -194,6 +195,9 @@ namespace TakXr.UI
                 if (hit.transform.GetComponentInParent<XrServerPanel>() != null) return true;
                 if (hit.transform.GetComponentInParent<XrSettingsPanel>() != null) return true;
                 if (hit.transform.GetComponentInParent<XrBasemapPanel>() != null) return true;
+                if (hit.transform.GetComponentInParent<XrChatContactsPanel>() != null) return true;
+                if (hit.transform.GetComponentInParent<XrEmergencyPanel>() != null) return true;
+                if (hit.transform.GetComponentInParent<XrOverlayManagerPanel>() != null) return true;
                 if (hit.transform.GetComponentInParent<XrDrawOptHit>() != null) return true;
             }
             return false;

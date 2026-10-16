@@ -19,7 +19,8 @@ $SourcePath = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 & (Join-Path $PSScriptRoot "ensure-android-sdk.ps1")
 
 if (-not $UnityExe) {
-    $candidates = Get-ChildItem "C:\Program Files\Unity\Hub\Editor" -Directory -ErrorAction SilentlyContinue |
+    $hubRoots = @("C:\Program Files\Unity\Hub\Editor", "$env:USERPROFILE\Unity\Hub\Editor") | Where-Object { Test-Path $_ }
+    $candidates = Get-ChildItem $hubRoots -Directory -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending |
         ForEach-Object { Join-Path $_.FullName "Editor\Unity.exe" } |
         Where-Object { Test-Path $_ }

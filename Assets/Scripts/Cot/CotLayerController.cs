@@ -36,6 +36,7 @@ namespace TakXr.Cot
         readonly Dictionary<string, CotMarkerView> _markers = new Dictionary<string, CotMarkerView>();
         readonly Dictionary<string, GameObject> _clusters = new Dictionary<string, GameObject>();
         readonly HashSet<string> _clusteredUids = new HashSet<string>();
+        readonly HashSet<string> _hiddenUids = new HashSet<string>();
         readonly List<CotMarkerView> _labelScratch = new List<CotMarkerView>(128);
         readonly List<int> _stackScratch = new List<int>(128);
         readonly List<bool> _crowdScratch = new List<bool>(128);
@@ -45,6 +46,59 @@ namespace TakXr.Cot
         float _nextBudgetLog;
         int _frame;
         Vector3 _lastClusterCamLocal = new Vector3(float.NaN, 0f, 0f);
+
+        // Overlay Manager visibility filters (all true by default).
+        public bool ShowUnits { get; set; } = true;
+        public bool ShowAircraft { get; set; } = true;
+        public bool ShowVideo { get; set; } = true;
+        public bool ShowObservers { get; set; } = true;
+        public bool ShowWaypoints { get; set; } = true;
+        public bool ShowPackages { get; set; } = true;
+        public IReadOnlyDictionary<string, CotMarkerView> Markers => _markers;
+        public GeoMath.Geodetic Origin => _origin;
+
+        public bool IsUidHidden(string uid) => !string.IsNullOrEmpty(uid) && _hiddenUids.Contains(uid);
+
+        public void SetUidVisible(string uid, bool visible)
+        {
+            if (string.IsNullOrEmpty(uid)) return;
+            if (visible) _hiddenUids.Remove(uid);
+            else _hiddenUids.Add(uid);
+            _dirty = true;
+        }
+
+        public bool IsCotVisibleByFilter(NormalizedCot cot)
+        {
+            if (cot == null || string.IsNullOrEmpty(cot.uid)) return false;
+            if (cot.IsChatMessage) return false;
+            if (_hiddenUids.Contains(cot.uid)) return false;
+            if (!ShowPackages && cot.group != null &&
+                (cot.group.StartsWith("package:", System.StringComparison.OrdinalIgnoreCase) ||
+                 cot.group.StartsWith("mission:", System.StringComparison.OrdinalIgnoreCase)))
+                return false;
+
+            var kind = CotClassifier.Classify(cot);
+            switch (kind)
+            {
+                case MarkerKind.AircraftFixed:
+                case MarkerKind.AircraftRotary:
+                    return ShowAircraft;
+                case MarkerKind.Video:
+                    return ShowVideo;
+                case MarkerKind.Observer:
+                    return ShowObservers;
+                case MarkerKind.TeamMember:
+                    return ShowUnits;
+                case MarkerKind.LocalIcon:
+                case MarkerKind.RemoteIcon:
+                case MarkerKind.Dcfs:
+                    return ShowWaypoints;
+                default:
+                    return !string.IsNullOrEmpty(cot.type) && cot.type.StartsWith("a-")
+                        ? ShowUnits
+                        : ShowWaypoints;
+            }
+        }
 
         public void Configure(AppConfig cfg, CotFeedClient feedClient, Camera cam)
         {
@@ -274,6 +328,7 @@ namespace TakXr.Cot
             foreach (var cot in feed.Cots.Values)
             {
                 if (cot?.point == null || string.IsNullOrEmpty(cot.uid)) continue;
+                if (!IsCotVisibleByFilter(cot)) continue;
                 var enu = GeoMath.GeodeticToEnu(
                     new GeoMath.Geodetic(cot.point.lat, cot.point.lon, 0),
                     _origin);

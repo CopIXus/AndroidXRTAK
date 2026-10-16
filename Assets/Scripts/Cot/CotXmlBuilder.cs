@@ -43,7 +43,44 @@ namespace TakXr.Cot
                   .Append("\"/>");
             }
             if (!string.IsNullOrEmpty(d?.remarks))
-                sb.Append("<remarks>").Append(Esc(d.remarks)).Append("</remarks>");
+            {
+                if (!string.IsNullOrEmpty(d?.chat?.senderCallsign))
+                    sb.Append("<remarks source=\"BAO.F.ATAK.").Append(Esc(d.chat.senderCallsign))
+                      .Append("\" to=\"").Append(Esc(d.chat.chatroom))
+                      .Append("\" time=\"").Append(Esc(cot.time)).Append("\">")
+                      .Append(Esc(d.remarks)).Append("</remarks>");
+                else
+                    sb.Append("<remarks>").Append(Esc(d.remarks)).Append("</remarks>");
+            }
+
+            if (d?.track != null && (!float.IsNaN(d.track.course) || d.track.speed > 0f))
+            {
+                sb.Append("<track course=\"").Append(F(float.IsNaN(d.track.course) ? 0f : d.track.course))
+                  .Append("\" speed=\"").Append(F(d.track.speed)).Append("\"/>");
+            }
+
+            if (!string.IsNullOrEmpty(d?.chat?.chatroom))
+            {
+                string chatId = string.IsNullOrEmpty(d.chat.id) ? d.chat.chatroom : d.chat.id;
+                string msgId = string.IsNullOrEmpty(d.chat.messageId) ? System.Guid.NewGuid().ToString() : d.chat.messageId;
+                sb.Append("<__chat parent=\"").Append(Esc(string.IsNullOrEmpty(d.chat.parent) ? "RootContactGroup" : d.chat.parent))
+                  .Append("\" groupOwner=\"").Append(d.chat.groupOwner ?? "false")
+                  .Append("\" messageId=\"").Append(Esc(msgId))
+                  .Append("\" chatroom=\"").Append(Esc(d.chat.chatroom))
+                  .Append("\" id=\"").Append(Esc(chatId))
+                  .Append("\" senderCallsign=\"").Append(Esc(d.chat.senderCallsign ?? cot.Callsign)).Append("\">")
+                  .Append("<chatgrp uid0=\"").Append(Esc(cot.uid)).Append("\" uid1=\"").Append(Esc(chatId))
+                  .Append("\" id=\"").Append(Esc(chatId)).Append("\"/>")
+                  .Append("</__chat>");
+            }
+
+            if (!string.IsNullOrEmpty(d?.emergency?.type) || (d?.emergency != null && d.emergency.cancel))
+            {
+                sb.Append("<emergency type=\"").Append(Esc(d.emergency.type ?? "911 Alert"))
+                  .Append("\" cancel=\"").Append(d.emergency.cancel ? "true" : "false").Append("\">")
+                  .Append(Esc(d.emergency.callsign ?? cot.Callsign))
+                  .Append("</emergency>");
+            }
 
             // TAK client/platform tag (<takv platform="VRTAK-XR" .../>) — lets
             // other clients identify VR observers.

@@ -238,12 +238,19 @@ namespace TakXr.Core
             var trackHistory = XrTrackHistory.Create();
             var rangeTool = XrRangeMeasureTool.Create();
             var elevationTool = XrElevationTool.Create();
+            var chatKeyboard = XrKeyboardPanel.Create();
+            var chatContactsPanel = XrChatContactsPanel.Create();
+            var emergencyPanel = XrEmergencyPanel.Create();
+            var overlayManagerPanel = XrOverlayManagerPanel.Create();
+            var tacticalSuite = gameObject.GetComponent<XrTacticalToolsSuite>() ??
+                                gameObject.AddComponent<XrTacticalToolsSuite>();
 
             _chrome = XrChromeHud.Create();
             _chrome.Configure(config, _cam.transform, _terrain, _loco, _world, _settings,
                 _feed, _cotLayer, _follow, _direct, _layersPanel, _drawTool,
                 basemapPanel, serverPanel, settingsPanel, _radial, _cop, _info, _video,
-                goToPanel, videoBrowser, trackHistory, rangeTool, elevationTool);
+                goToPanel, videoBrowser, trackHistory, rangeTool, elevationTool,
+                chatContactsPanel, emergencyPanel, overlayManagerPanel, tacticalSuite);
             serverPanel.SetFlashStatus(msg => _chrome.FlashStatus(msg));
             settingsPanel.SetFlashStatus(msg => _chrome.FlashStatus(msg));
             _drawTool.Configure(config, _feed, _direct, _world, _terrain, _cam.transform,
@@ -257,6 +264,14 @@ namespace TakXr.Core
                 msg => _chrome.FlashStatus(msg));
             elevationTool.Configure(config, _feed, _direct, _world, _terrain, _cam.transform,
                 msg => _chrome.FlashStatus(msg));
+            chatContactsPanel.Configure(config, _feed, _cotLayer, _direct, _follow, _world,
+                chatKeyboard, _cam.transform, msg => _chrome.FlashStatus(msg));
+            emergencyPanel.Configure(config, _feed, _direct, _world, _terrain, _cam.transform,
+                msg => _chrome.FlashStatus(msg));
+            overlayManagerPanel.Configure(config, _feed, _cotLayer, _layersPanel, _world, _terrain,
+                _cam.transform, msg => _chrome.FlashStatus(msg));
+            tacticalSuite.Configure(config, _feed, _cotLayer, _direct, _follow, _world, _terrain,
+                _cam.transform, msg => _chrome.FlashStatus(msg));
 
             _loco.SetSnapTurnEnabled(_settings != null && _settings.SnapTurnEnabled);
 

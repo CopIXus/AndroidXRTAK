@@ -165,6 +165,7 @@ namespace TakXr.UI
                 ("details", "Details", dark, OnDetails),
                 ("follow", following ? "Unfollow" : "Follow", blue, OnFollow),
                 ("locate", "Go To", dark, OnGoTo),
+                ("quicknav", "Bloodhound", new Color(0.38f, 0.16f, 0.44f, 0.92f), OnBloodhound),
             };
             if (hasVideo) slices.Add(("video", "Video", green, OnVideo));
             slices.Add(("rb", rbActive ? "R&B off" : "R&B", dark, OnRangeBearing));
@@ -326,6 +327,13 @@ namespace TakXr.UI
             Hide();
             _follow?.SetFollow(turnOn ? uid : null);
             _flash?.Invoke(turnOn ? $"Following {name}" : "Follow stopped");
+        }
+
+        void OnBloodhound()
+        {
+            var uid = _uid;
+            Hide();
+            XrTacticalToolsSuite.Instance?.ToggleQuickNav(uid);
         }
 
         void OnGoTo()

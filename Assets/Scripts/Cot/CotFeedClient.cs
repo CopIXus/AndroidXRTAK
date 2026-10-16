@@ -20,6 +20,7 @@ namespace TakXr.Cot
 
         readonly Dictionary<string, NormalizedCot> _cots = new Dictionary<string, NormalizedCot>();
         readonly Dictionary<string, HashSet<string>> _uidServers = new Dictionary<string, HashSet<string>>();
+        readonly List<NormalizedCot> _chatHistory = new List<NormalizedCot>();
         readonly Queue<Action> _mainThread = new Queue<Action>();
         ClientWebSocket _ws;
         CancellationTokenSource _cts;
@@ -27,7 +28,10 @@ namespace TakXr.Cot
         float _reconnectDelay = 1f;
 
         public IReadOnlyDictionary<string, NormalizedCot> Cots => _cots;
+        public IReadOnlyList<NormalizedCot> ChatHistory => _chatHistory;
         public event Action Changed;
+        public event Action<NormalizedCot> ChatReceived;
+        public event Action<NormalizedCot> EmergencyReceived;
         public event Action<string> ConnectionStateChanged;
         public string ConnectionState { get; private set; } = "closed";
 
@@ -70,6 +74,24 @@ namespace TakXr.Cot
         public void UpsertDirect(NormalizedCot cot, bool notify = true)
         {
             if (cot == null || string.IsNullOrEmpty(cot.uid)) return;
+
+            // GeoChat messages (b-t-f) go to ChatHistory rather than spawning map pins.
+            if (cot.IsChatMessage)
+            {
+                _chatHistory.Add(cot);
+                if (_chatHistory.Count > 200) _chatHistory.RemoveAt(0);
+                ChatReceived?.Invoke(cot);
+                return;
+            }
+
+            // Emergency cancellation removes the alert pin.
+            if (cot.detail?.emergency != null && cot.detail.emergency.cancel)
+            {
+                RemoveByUid(cot.uid, notify);
+                EmergencyReceived?.Invoke(cot);
+                return;
+            }
+
             if (!string.IsNullOrEmpty(cot.sourceServerId))
             {
                 if (!_uidServers.TryGetValue(cot.uid, out var set) || set == null)
@@ -80,6 +102,7 @@ namespace TakXr.Cot
                 set.Add(cot.sourceServerId);
             }
             _cots[cot.uid] = cot;
+            if (cot.IsEmergency) EmergencyReceived?.Invoke(cot);
             if (notify) Changed?.Invoke();
         }
 

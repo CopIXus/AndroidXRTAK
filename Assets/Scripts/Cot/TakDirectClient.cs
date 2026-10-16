@@ -450,6 +450,35 @@ namespace TakXr.Cot
                     if (detail.SelectSingleNode("remarks") is XmlElement remarks)
                         cot.detail.remarks = remarks.InnerText;
 
+                    if (detail.SelectSingleNode("__chat") is XmlElement chatEl)
+                    {
+                        cot.detail.chat = new CotChat
+                        {
+                            id = chatEl.GetAttribute("id"),
+                            chatroom = chatEl.GetAttribute("chatroom"),
+                            senderCallsign = chatEl.GetAttribute("senderCallsign"),
+                            groupOwner = chatEl.GetAttribute("groupOwner"),
+                            messageId = chatEl.GetAttribute("messageId"),
+                            parent = chatEl.GetAttribute("parent"),
+                        };
+                        if (!string.IsNullOrEmpty(cot.detail.chat.senderCallsign) &&
+                            string.IsNullOrEmpty(cot.contact?.callsign))
+                        {
+                            cot.contact = new CotContact { callsign = cot.detail.chat.senderCallsign };
+                        }
+                    }
+
+                    if (detail.SelectSingleNode("emergency") is XmlElement emEl)
+                    {
+                        var cancelAttr = emEl.GetAttribute("cancel");
+                        cot.detail.emergency = new CotEmergency
+                        {
+                            type = emEl.GetAttribute("type"),
+                            callsign = emEl.InnerText,
+                            cancel = string.Equals(cancelAttr, "true", StringComparison.OrdinalIgnoreCase),
+                        };
+                    }
+
                     var video = (detail.SelectSingleNode("__video") ?? detail.SelectSingleNode("video")) as XmlElement;
                     if (video != null)
                     {

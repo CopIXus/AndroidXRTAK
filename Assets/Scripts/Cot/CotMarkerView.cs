@@ -50,6 +50,12 @@ namespace TakXr.Cot
         /// Split from ScaleMultiplier so icon and text sizes tune independently.</summary>
         public static float LabelScaleMultiplier { get; set; } = 1f;
 
+        /// <summary>When true, CoTs occluded behind hills/buildings within XrayMaxDistanceMeters
+        /// render semi-transparently (X-Ray silhouette) through terrain.</summary>
+        public static bool XrayOccludedEnabled { get; set; } = true;
+        public static float XrayMaxDistanceMeters { get; set; } = 12000f;
+        public static float XrayBaseAlpha { get; set; } = 0.38f;
+
         public string Uid { get; private set; }
         public NormalizedCot Cot { get; private set; }
 
@@ -58,6 +64,12 @@ namespace TakXr.Cot
 
         Transform _billboardRoot;
         GameObject _modelInstance;
+        readonly List<Renderer> _modelRenderers = new List<Renderer>(12);
+        readonly List<Material> _modelOrigMats = new List<Material>(12);
+        bool _isOccludedBehindTerrain;
+        bool _xrayApplied;
+        int _lastXrayAlphaQuant = -1;
+        int _occlusionTickOffset;
         Transform _emergencyHalo;
         TextMesh _label;
         MeshRenderer _labelRend;
@@ -111,6 +123,15 @@ namespace TakXr.Cot
         {
             Uid = cot.uid;
             Cot = cot;
+            _occlusionTickOffset = Mathf.Abs((cot.uid ?? "").GetHashCode()) % 6;
+            if (config != null)
+            {
+                XrayOccludedEnabled = config.xrayOccludedCots;
+                if (config.xrayMaxDistanceMeters > 100f)
+                    XrayMaxDistanceMeters = config.xrayMaxDistanceMeters;
+                if (config.xrayOccludedAlpha > 0.05f)
+                    XrayBaseAlpha = config.xrayOccludedAlpha;
+            }
             EnsureVisuals();
             Refresh(cot, config);
             FaceCamera(cameraTransform);
@@ -200,6 +221,10 @@ namespace TakXr.Cot
             _modelKey = key;
             if (_modelInstance != null)
                 Destroy(_modelInstance);
+            _modelRenderers.Clear();
+            _modelOrigMats.Clear();
+            _xrayApplied = false;
+            _lastXrayAlphaQuant = -1;
             _modelInstance = builder();
             if (_modelInstance != null && _billboardRoot != null)
             {
@@ -207,6 +232,13 @@ namespace TakXr.Cot
                 _modelInstance.transform.localPosition = Vector3.zero;
                 _modelInstance.transform.localRotation = Quaternion.identity;
                 _modelInstance.transform.localScale = Vector3.one;
+                var rends = _modelInstance.GetComponentsInChildren<Renderer>(true);
+                foreach (var r in rends)
+                {
+                    if (r == null) continue;
+                    _modelRenderers.Add(r);
+                    _modelOrigMats.Add(r.sharedMaterial);
+                }
             }
         }
 
@@ -472,15 +504,44 @@ namespace TakXr.Cot
 
         void ResampleGroundIfNeeded()
         {
-            if (!_haveClampGeo || _terrain == null) return;
-            if (!_terrain.TrySampleHae(_clampLat, _clampLon, out float demHae)) return;
-            var groundEnu = GeoMath.GeodeticToEnu(
-                new GeoMath.Geodetic(_clampLat, _clampLon, demHae), _origin);
-            float gy = GeoMath.EnuToUnity(groundEnu).y;
-            if (!_groundSampled || gy > _groundLocalY + 0.02f)
+            // 1. Sample DemTerrainMap elevation if available.
+            if (_haveClampGeo && _terrain != null && _terrain.TrySampleHae(_clampLat, _clampLon, out float demHae))
             {
-                _groundLocalY = gy;
-                _groundSampled = true;
+                var groundEnu = GeoMath.GeodeticToEnu(
+                    new GeoMath.Geodetic(_clampLat, _clampLon, demHae), _origin);
+                float gy = GeoMath.EnuToUnity(groundEnu).y;
+                if (!_groundSampled || gy > _groundLocalY + 0.02f)
+                {
+                    _groundLocalY = gy;
+                    _groundSampled = true;
+                }
+            }
+
+            // 2. Also sample downward against any 3D photogrammetry / Google 3D Tiles meshes
+            // (every 12 frames per marker so CoTs ride on top of 3D buildings and bridges).
+            if (!_isAirborne && transform.parent != null && ((Time.frameCount + _occlusionTickOffset) % 12 == 0))
+            {
+                var topWorld = transform.position + Vector3.up * 250f;
+                var hits = Physics.RaycastAll(topWorld, Vector3.down, 600f, ~0, QueryTriggerInteraction.Ignore);
+                float bestSurfaceWorldY = float.NegativeInfinity;
+                foreach (var h in hits)
+                {
+                    if (h.collider == null || h.collider.isTrigger) continue;
+                    if (h.transform.GetComponentInParent<CotMarkerView>() != null) continue;
+                    if (h.transform.GetComponentInParent<XrChromeHud>() != null) continue;
+                    if (h.point.y > bestSurfaceWorldY)
+                        bestSurfaceWorldY = h.point.y;
+                }
+                if (!float.IsNegativeInfinity(bestSurfaceWorldY))
+                {
+                    var surfaceLocal = transform.parent.InverseTransformPoint(
+                        new Vector3(transform.position.x, bestSurfaceWorldY, transform.position.z));
+                    if (!_groundSampled || surfaceLocal.y > _groundLocalY + 0.25f)
+                    {
+                        _groundLocalY = surfaceLocal.y;
+                        _groundSampled = true;
+                    }
+                }
             }
         }
 
@@ -547,6 +608,8 @@ namespace TakXr.Cot
                 _hit.size = new Vector3(1.1f, 1.1f, 1.1f);
             }
 
+            UpdateOcclusionXray(cam, dist);
+
             if (_label != null)
             {
                 float hover = meters * LabelHover3D;
@@ -576,6 +639,107 @@ namespace TakXr.Cot
             }
             UpdateLeaderLine();
             UpdateAltitudeDropLine();
+        }
+
+        void UpdateOcclusionXray(Transform cam, float dist)
+        {
+            if (((Time.frameCount + _occlusionTickOffset) % 6) == 0)
+            {
+                _isOccludedBehindTerrain = CheckIfOccludedFromCamera(cam, dist);
+            }
+
+            bool withinReasonableDist = dist <= XrayMaxDistanceMeters;
+            bool wantXray = XrayOccludedEnabled && _isOccludedBehindTerrain && withinReasonableDist;
+
+            if (wantXray)
+            {
+                float distFactor = Mathf.Clamp01(dist / Mathf.Max(500f, XrayMaxDistanceMeters));
+                float alpha = Mathf.Lerp(XrayBaseAlpha + 0.08f, Mathf.Max(0.16f, XrayBaseAlpha - 0.16f), distFactor);
+                int qAlpha = Mathf.RoundToInt(alpha * 20f);
+                if (!_xrayApplied || qAlpha != _lastXrayAlphaQuant)
+                {
+                    _xrayApplied = true;
+                    _lastXrayAlphaQuant = qAlpha;
+                    var fallbackCol = UnitDotColor(Cot);
+                    for (int i = 0; i < _modelRenderers.Count; i++)
+                    {
+                        var r = _modelRenderers[i];
+                        if (r == null) continue;
+                        r.sharedMaterial = Cot3dModelFactory.GetXraySeeThroughMaterial(_modelOrigMats[i], fallbackCol, alpha);
+                    }
+                }
+            }
+            else if (_xrayApplied)
+            {
+                _xrayApplied = false;
+                _lastXrayAlphaQuant = -1;
+                for (int i = 0; i < _modelRenderers.Count; i++)
+                {
+                    var r = _modelRenderers[i];
+                    if (r == null) continue;
+                    r.sharedMaterial = _modelOrigMats[i];
+                }
+            }
+
+            if (_label != null)
+            {
+                // Hide callsigns of occluded CoTs that are beyond the reasonable X-Ray distance.
+                bool showLabel = !_isOccludedBehindTerrain || (XrayOccludedEnabled && withinReasonableDist);
+                if (_label.gameObject.activeSelf != showLabel)
+                    _label.gameObject.SetActive(showLabel);
+                if (showLabel)
+                {
+                    float lblAlpha = _isOccludedBehindTerrain ? 0.65f : 0.98f;
+                    var c = _isEmergency ? new Color(1f, 0.35f, 0.35f, lblAlpha) : new Color(1f, 1f, 0.95f, lblAlpha);
+                    _label.color = c;
+                }
+            }
+        }
+
+        bool CheckIfOccludedFromCamera(Transform cam, float dist)
+        {
+            if (dist < 25f) return false;
+            var camPos = cam.position;
+            var targetPos = transform.position;
+            var dir = (targetPos - camPos);
+            float len = dir.magnitude;
+            if (len < 1e-3f) return false;
+            dir /= len;
+
+            // 1. Check 3D physics colliders (3D buildings from Google Photorealistic 3D Tiles or terrain colliders).
+            var hits = Physics.RaycastAll(camPos, dir, len * 0.93f, ~0, QueryTriggerInteraction.Ignore);
+            foreach (var h in hits)
+            {
+                if (h.collider == null || h.collider.isTrigger) continue;
+                if (h.transform.IsChildOf(transform) || h.transform.GetComponentInParent<CotMarkerView>() != null) continue;
+                if (h.transform.GetComponentInParent<XrChromeHud>() != null) continue;
+                return true;
+            }
+
+            // 2. Sample DEM terrain elevation profile along the line-of-sight between viewer and CoT.
+            if (_terrain != null && transform.parent != null)
+            {
+                var camLocal = transform.parent.InverseTransformPoint(camPos);
+                var targetLocal = transform.localPosition;
+                // Sample 4 intermediate steps along the ray (20%, 42%, 64%, 84%).
+                float[] steps = { 0.20f, 0.42f, 0.64f, 0.84f };
+                foreach (float t in steps)
+                {
+                    var sampleLocal = Vector3.Lerp(camLocal, targetLocal, t);
+                    var sampleEnu = new GeoMath.Enu(sampleLocal.x, sampleLocal.z, sampleLocal.y);
+                    var sampleGeo = GeoMath.EnuToGeodetic(sampleEnu, _origin);
+                    if (_terrain.TrySampleHae(sampleGeo.Lat, sampleGeo.Lon, out float ridgeHae))
+                    {
+                        var ridgeEnu = GeoMath.GeodeticToEnu(
+                            new GeoMath.Geodetic(sampleGeo.Lat, sampleGeo.Lon, ridgeHae), _origin);
+                        float ridgeLocalY = GeoMath.EnuToUnity(ridgeEnu).y;
+                        if (ridgeLocalY > sampleLocal.y + 4.5f)
+                            return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         void UpdateLabelDecorations()

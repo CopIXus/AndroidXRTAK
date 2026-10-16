@@ -106,6 +106,43 @@ namespace TakXr.Cot
             return mat;
         }
 
+        /// <summary>
+        /// Returns a cached semi-transparent X-Ray material (ZTest Always, ZWrite Off)
+        /// so 3D CoTs occluded behind hills, ridges, or 3D buildings within reasonable range
+        /// remain visible as a translucent silhouette through obstacles.
+        /// </summary>
+        public static Material GetXraySeeThroughMaterial(Material origMat, Color fallbackColor, float alpha = 0.38f)
+        {
+            Color baseCol = fallbackColor;
+            if (origMat != null)
+            {
+                if (origMat.HasProperty("_BaseColor")) baseCol = origMat.GetColor("_BaseColor");
+                else if (origMat.HasProperty("_Color")) baseCol = origMat.GetColor("_Color");
+            }
+            int qAlpha = Mathf.RoundToInt(Mathf.Clamp(alpha, 0.12f, 0.75f) * 20f);
+            float snappedAlpha = qAlpha / 20f;
+            var xrayCol = new Color(
+                Mathf.Lerp(baseCol.r, 1f, 0.15f),
+                Mathf.Lerp(baseCol.g, 1f, 0.15f),
+                Mathf.Lerp(baseCol.b, 1f, 0.15f),
+                snappedAlpha);
+
+            string key = $"xray:{ColorUtility.ToHtmlStringRGBA(xrayCol)}";
+            if (MatCache.TryGetValue(key, out var mat) && mat != null)
+                return mat;
+
+            var sh = Shader.Find("Sprites/Default") ?? UnlitShader;
+            mat = new Material(sh);
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", xrayCol);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", xrayCol);
+            if (mat.HasProperty("_ZTest")) mat.SetInt("_ZTest", (int)CompareFunction.Always);
+            if (mat.HasProperty("_ZWrite")) mat.SetInt("_ZWrite", 0);
+            if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
+            mat.renderQueue = 3110;
+            MatCache[key] = mat;
+            return mat;
+        }
+
         // ------------------------------------------------------------------
         // 1. 3D UNIT SPHERE ("BALL") — TeamMember & Dot CoTs
         // ------------------------------------------------------------------

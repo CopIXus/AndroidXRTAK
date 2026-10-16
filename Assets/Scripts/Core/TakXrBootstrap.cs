@@ -111,12 +111,16 @@ namespace TakXr.Core
             yield return new WaitForSeconds(0.25f);
             if (startWithMap)
             {
-                config.showMap = false;
-                _map?.SetMapEnabled(false);
+                bool has3dTilesKey = !string.IsNullOrEmpty(config.googleMaps3dTilesApiKey) ||
+                                     !string.IsNullOrEmpty(config.cesiumIonToken);
+                config.showMap = has3dTilesKey && config.useGooglePhotorealistic3dTiles;
+                _map?.SetMapEnabled(config.showMap);
                 if (_terrain != null)
                 {
                     _terrain.Configure(config);
-                    _boot.SetStatus("TAKXR", "Loading 3D terrain (DEM + satellite)…");
+                    _boot.SetStatus("TAKXR", config.showMap
+                        ? "Loading Google Photorealistic 3D Tiles + DEM…"
+                        : "Loading 3D terrain (DEM + Google Hybrid)…");
                 }
             }
 

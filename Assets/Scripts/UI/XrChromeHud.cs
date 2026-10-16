@@ -251,15 +251,22 @@ namespace TakXr.UI
                 "TAKXR 3D  ·  Initializing…", 0.0048f, new Color(0.90f, 0.97f, 1f, 0.98f),
                 TextAnchor.MiddleLeft, TextAlignment.Left);
 
+            // Quick 1:1 360° Ground Immersion + X-Ray Occlusion button on top pill
+            AddPillButton("top_immerse", new Vector3(0.11f, 0f, -0.002f), new Vector2(0.16f, 0.048f),
+                "Immerse 360°", new Color(0.08f, 0.48f, 0.36f, 0.96f), () =>
+                {
+                    tacticalSuite?.ToggleImmersiveGroundView();
+                });
+
             // Quick 3D Demo Spawn button on top pill
-            AddPillButton("top_demo3d", new Vector3(0.22f, 0f, -0.002f), new Vector2(0.16f, 0.048f),
+            AddPillButton("top_demo3d", new Vector3(0.28f, 0f, -0.002f), new Vector2(0.14f, 0.048f),
                 "3D Demo", new Color(0.12f, 0.42f, 0.58f, 0.95f), () =>
                 {
                     overlayManagerPanel?.ToggleDemoFormation();
                 });
 
             // Quick 911 / CASEVAC button on top pill
-            AddPillButton("top_911", new Vector3(0.41f, 0f, -0.002f), new Vector2(0.18f, 0.048f),
+            AddPillButton("top_911", new Vector3(0.44f, 0f, -0.002f), new Vector2(0.15f, 0.048f),
                 "911 / MED", new Color(0.68f, 0.14f, 0.16f, 0.96f), () =>
                 {
                     HideSidePanels();

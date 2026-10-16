@@ -14,6 +14,8 @@ namespace TakXr.Map
     public class CesiumMapController : MonoBehaviour
     {
         const long WorldTerrainAssetId = 1;
+        const long GooglePhotorealistic3dTilesAssetId = 2275207;
+        const string Google3dTilesRootUrl = "https://tile.googleapis.com/v1/3dtiles/root.json?key=";
         // Match web XrTileMap URL (server.arcgisonline.com).
         const string EsriWorldImageryTemplate =
             "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
@@ -45,6 +47,13 @@ namespace TakXr.Map
             ResolveCesiumTypes();
             EnsureFallback(true);
             HasTerrainRelief = false;
+
+            if (config != null && string.IsNullOrEmpty(config.googleMaps3dTilesApiKey))
+            {
+                var savedGoogleKey = PlayerPrefs.GetString("takxr.google3dKey", "");
+                if (!string.IsNullOrEmpty(savedGoogleKey))
+                    config.googleMaps3dTilesApiKey = savedGoogleKey;
+            }
 
             if (!_ionFetchStarted)
             {
@@ -132,7 +141,7 @@ namespace TakXr.Map
 
         IEnumerator FetchIonTokenThenMaybeEnableMap()
         {
-            if (config != null && !string.IsNullOrEmpty(config.cesiumIonToken))
+            if (config != null && (!string.IsNullOrEmpty(config.cesiumIonToken) || !string.IsNullOrEmpty(config.googleMaps3dTilesApiKey)))
             {
                 _ionReady = true;
                 EnsureMap();
@@ -199,14 +208,16 @@ namespace TakXr.Map
                 return;
             }
 
-            // Critical: do not spawn Cesium (or hide the floor) without a token —
+            bool hasCredentials = config != null &&
+                (!string.IsNullOrEmpty(config.cesiumIonToken) || !string.IsNullOrEmpty(config.googleMaps3dTilesApiKey));
+            // Critical: do not spawn Cesium (or hide the floor) without a token/key —
             // a 401 tileset renders as a black void on device.
-            if (!_ionReady || config == null || string.IsNullOrEmpty(config.cesiumIonToken))
+            if (!_ionReady || !hasCredentials)
             {
                 SetTilesetVisible(false);
                 EnsureFallback(true);
                 HasTerrainRelief = false;
-                Debug.Log("[CesiumMap] Map requested but Ion token not ready — showing fallback floor");
+                Debug.Log("[CesiumMap] Map requested but Ion token / Google 3D key not ready — showing fallback floor");
                 return;
             }
 
@@ -265,25 +276,58 @@ namespace TakXr.Map
                 _tileset = FindObjectOfTypeSafe(_tilesetType);
             if (_tileset != null)
             {
-                EnsureEsriOverlay(_tileset.gameObject);
-                ApplyIonToken(config != null ? config.cesiumIonToken : null);
+                ConfigureTilesetSource(_tileset.gameObject);
                 return;
             }
 
             if (_georeference == null) return;
 
-            var go = new GameObject("CesiumWorldTerrain");
+            var go = new GameObject("GooglePhotorealistic3dOrWorldTerrain");
             go.transform.SetParent(_georeference.transform, false);
             _tileset = go.AddComponent(_tilesetType);
+            ConfigureTilesetSource(go);
+        }
+
+        void ConfigureTilesetSource(GameObject tilesetGo)
+        {
+            if (_tileset == null) return;
+
+            // Enable physics meshes so CoTs can raycast-clamp onto 3D building rooftops and bridges,
+            // and X-Ray occlusion raycasts can detect when a CoT is behind a 3D building.
+            SetProp(_tileset, "createPhysicsMeshes", true);
+
+            bool hasDirectGoogleKey = config != null && !string.IsNullOrEmpty(config.googleMaps3dTilesApiKey);
+            bool wantGoogle3d = config != null && config.useGooglePhotorealistic3dTiles;
+
+            if (hasDirectGoogleKey && _dataSourceType != null)
+            {
+                var fromUrl = Enum.Parse(_dataSourceType, "FromUrl");
+                SetProp(_tileset, "tilesetSource", fromUrl);
+                SetProp(_tileset, "url", Google3dTilesRootUrl + config.googleMaps3dTilesApiKey.Trim());
+                SetProp(_tileset, "showCreditsOnScreen", true);
+                Debug.Log("[CesiumMap] Configured Google Maps Photorealistic 3D Tiles via direct tile.googleapis.com URL");
+                return;
+            }
+
             if (_dataSourceType != null)
             {
                 var fromIon = Enum.Parse(_dataSourceType, "FromCesiumIon");
                 SetProp(_tileset, "tilesetSource", fromIon);
             }
-            SetProp(_tileset, "ionAssetID", WorldTerrainAssetId);
-            ApplyIonToken(config != null ? config.cesiumIonToken : null);
-            EnsureEsriOverlay(go);
-            Debug.Log("[CesiumMap] Created World Terrain tileset + ESRI imagery overlay");
+
+            if (wantGoogle3d)
+            {
+                SetProp(_tileset, "ionAssetID", GooglePhotorealistic3dTilesAssetId);
+                ApplyIonToken(config != null ? config.cesiumIonToken : null);
+                Debug.Log("[CesiumMap] Configured Google Photorealistic 3D Tiles via Cesium Ion (Asset 2275207)");
+            }
+            else
+            {
+                SetProp(_tileset, "ionAssetID", WorldTerrainAssetId);
+                ApplyIonToken(config != null ? config.cesiumIonToken : null);
+                EnsureEsriOverlay(tilesetGo);
+                Debug.Log("[CesiumMap] Configured World Terrain tileset + ESRI imagery overlay");
+            }
         }
 
         void EnsureEsriOverlay(GameObject tilesetGo)

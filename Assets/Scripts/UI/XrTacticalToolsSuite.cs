@@ -518,7 +518,56 @@ namespace TakXr.UI
             }
         }
 
-        // ---------------- 4. 3D Tabletop / Rubber Sheet Sand-Table Mode ----------------
+        // ---------------- 4. 3D Tabletop & 1:1 Immersive Ground Mode ----------------
+
+        bool _immersiveGroundActive;
+
+        /// <summary>
+        /// Toggles between 1:1 Eye-Level Ground Immersion (~14m AGL on the 3D terrain
+        /// with 0° level horizon and X-Ray see-through for CoTs behind hills/buildings)
+        /// and 420m Aerial Overwatch.
+        /// </summary>
+        public void ToggleImmersiveGroundView()
+        {
+            if (_world == null || _cam == null) return;
+
+            if (_tabletopActive)
+            {
+                _tabletopActive = false;
+                _world.Root.localScale = Vector3.one;
+                if (_tabletopPedestal != null) _tabletopPedestal.gameObject.SetActive(false);
+            }
+
+            // Level any world tilt so the 3D horizon surrounds the user naturally at 0°.
+            _world.SetPitchAboutPoint(_cam.position, 0f);
+            _world.Root.localScale = Vector3.one;
+
+            var viewerLocal = _world.Root.InverseTransformPoint(_cam.position);
+            LocalToLatLon(viewerLocal, out double lat, out double lon);
+            float groundY = GroundLocalY(lat, lon, out float hae);
+
+            if (!_immersiveGroundActive)
+            {
+                _immersiveGroundActive = true;
+                CotMarkerView.XrayOccludedEnabled = true;
+                // Place viewer 14m above the sampled 3D ground right at their current lat/lon.
+                float targetLocalY = groundY + 14f;
+                float deltaY = viewerLocal.y - targetLocalY;
+                _world.Root.position += new Vector3(0f, deltaY, 0f);
+                _cotLayer?.ForceSync();
+                _flash?.Invoke($"360° IMMERSIVE GROUND VIEW (14m AGL · {hae:0}m HAE)\nStanding in the 3D world · CoTs behind hills/buildings glow semi-transparently within {CotMarkerView.XrayMaxDistanceMeters / 1000f:0} km");
+            }
+            else
+            {
+                _immersiveGroundActive = false;
+                float overwatchHeight = _config != null ? _config.startCameraHeightMeters : 420f;
+                float targetLocalY = groundY + overwatchHeight;
+                float deltaY = viewerLocal.y - targetLocalY;
+                _world.Root.position += new Vector3(0f, deltaY, 0f);
+                _cotLayer?.ForceSync();
+                _flash?.Invoke($"OVERWATCH AERIAL VIEW ({overwatchHeight:0}m AGL)\nTap Immerse 360° anytime to drop back to ground level");
+            }
+        }
 
         public void ToggleTabletopMode()
         {

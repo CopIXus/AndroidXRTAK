@@ -31,6 +31,22 @@ namespace TakXr.Core
         [Tooltip("Optional Ion token override; otherwise fetched from /api/config/public.")]
         public string cesiumIonToken = "";
 
+        [Tooltip("Optional Google Map Tiles API Key for Photorealistic 3D Tiles (https://tile.googleapis.com/v1/3dtiles/root.json).")]
+        public string googleMaps3dTilesApiKey = "";
+
+        [Tooltip("When true and a Google 3D Tiles key or Cesium Ion token is present, stream Google Photorealistic 3D Tiles (Asset 2275207 / tile.googleapis.com).")]
+        public bool useGooglePhotorealistic3dTiles = true;
+
+        [Header("Immersive 3D & X-Ray Occlusion")]
+        [Tooltip("When true, CoTs behind terrain ridges or 3D buildings within xrayMaxDistanceMeters render semi-transparently through obstacles.")]
+        public bool xrayOccludedCots = true;
+
+        [Tooltip("Maximum distance (meters) at which an occluded CoT remains visible as a semi-transparent X-Ray silhouette (~12 km default).")]
+        public float xrayMaxDistanceMeters = 12000f;
+
+        [Tooltip("Opacity (0.15 - 0.65) of CoT 3D models when occluded behind terrain or 3D buildings.")]
+        public float xrayOccludedAlpha = 0.38f;
+
         [Header("AOI / clustering")]
         [Tooltip("Map focus radius and ground-CoT cluster enter distance (meters). 100 miles.")]
         public float mapRadiusMeters = 100f * 1609.344f;

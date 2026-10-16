@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.IO;
 using UnityEngine;
@@ -20,6 +20,8 @@ namespace TakXr.Core
         public int takEnrollPort;
         public string takClientP12Password;
         public string takClientP12;
+        public string googleMaps3dTilesApiKey;
+        public string cesiumIonToken;
     }
 
     public static class LocalConfigLoader
@@ -76,6 +78,10 @@ namespace TakXr.Core
                 config.takClientP12Password = data.takClientP12Password;
             if (!string.IsNullOrEmpty(data.takClientP12))
                 config.takClientP12 = data.takClientP12;
+            if (!string.IsNullOrEmpty(data.googleMaps3dTilesApiKey))
+                config.googleMaps3dTilesApiKey = data.googleMaps3dTilesApiKey;
+            if (!string.IsNullOrEmpty(data.cesiumIonToken))
+                config.cesiumIonToken = data.cesiumIonToken;
         }
     }
 }

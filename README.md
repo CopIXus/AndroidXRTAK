@@ -1,4 +1,4 @@
-﻿<p align="center">
+<p align="center">
   <img src="docs/logo.png" alt="XRTAK" width="280">
 </p>
 
@@ -14,8 +14,19 @@ Sibling of `T:\CopIX\TAKXR`. Product brief: [`../TAKXR/docs/XR-APK-SPIKE.md`](..
 **GitHub:** [CopIXus/AndroidXRTAK](https://github.com/CopIXus/AndroidXRTAK) — public source + Release APKs (no enrolled cert in the published APK).
 
 <p align="center">
-  <img src="docs/headset-view.png" alt="TAKXR on Samsung Galaxy XR" width="900">
+  <img src="docs/xrtak-showcase.jpg" alt="XRTAK 3D Volumetric CoT & Spatial UI on Samsung Galaxy XR" width="900">
 </p>
+
+<p align="center">
+  <img src="docs/xrtak-architecture.jpg" alt="XRTAK 3D Architecture & Spatial Component Suite" width="900">
+</p>
+
+<details>
+  <summary>Legacy Headset View (Pre-3D Overhaul)</summary>
+  <p align="center">
+    <img src="docs/headset-view.png" alt="TAKXR Legacy View" width="720">
+  </p>
+</details>
 
 ## Stack
 

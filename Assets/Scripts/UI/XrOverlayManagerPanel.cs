@@ -81,10 +81,11 @@ namespace TakXr.UI
             _root.SetParent(transform, false);
             _root.gameObject.SetActive(false);
 
-            Quad("Bg", _root, new Vector3(0f, 0f, 0.01f), new Vector2(PanelW, PanelH),
-                new Color(0.04f, 0.08f, 0.14f, 0.95f), 2990);
-            Quad("TopBar", _root, new Vector3(0f, PanelH / 2f - 0.008f, 0.005f),
-                new Vector2(PanelW, 0.014f), new Color(0.20f, 0.85f, 0.65f, 0.96f), 2995);
+            XrCurvedWidgets.CreateCurvedPanelPlate(
+                "CurvedBg", _root, PanelW, PanelH,
+                new Color(0.04f, 0.09f, 0.15f, 0.95f),
+                new Color(0.18f, 0.88f, 0.96f, 0.96f),
+                archHeight: 0.012f, depthWrap: 0.038f, renderQueue: 2990);
 
             _contentRoot = new GameObject("Content").transform;
             _contentRoot.SetParent(_root, false);
@@ -599,14 +600,18 @@ namespace TakXr.UI
 
         void AddButton(string name, Vector3 pos, Vector2 size, string label, bool active, Action onClick)
         {
-            var root = new GameObject("Btn_" + name).transform;
-            root.SetParent(_contentRoot, false);
-            root.localPosition = pos;
-            Color bg = active
-                ? new Color(0.14f, 0.50f, 0.44f, 0.97f)
-                : new Color(0.10f, 0.19f, 0.28f, 0.95f);
-            Quad("Bg", root, Vector3.zero, size, bg, 3000);
-            Text("Lbl", root, new Vector3(0f, 0f, -0.005f), label, 0.0060f, Color.white);
+            XrCurvedWidgets.EvaluateArc(pos.x, PanelW * 0.5f, 0.012f, 0.038f, out var arcOff, out var arcRot);
+            Color fill = active
+                ? new Color(0.12f, 0.36f, 0.44f, 0.97f)
+                : new Color(0.08f, 0.16f, 0.25f, 0.96f);
+            Color border = active
+                ? new Color(0.25f, 0.95f, 1f, 0.95f)
+                : new Color(0.20f, 0.68f, 0.88f, 0.80f);
+            var root = XrCurvedWidgets.CreateRoundedButtonCard(
+                "Btn_" + name, _contentRoot, size, fill, border, 3000);
+            root.localPosition = new Vector3(pos.x, pos.y + arcOff.y * 0.35f, pos.z + arcOff.z * 0.65f);
+            root.localRotation = arcRot;
+            Text("Lbl", root, new Vector3(0f, 0f, -0.005f), label, 0.0058f, Color.white);
             var col = root.gameObject.AddComponent<BoxCollider>();
             col.size = new Vector3(size.x + 0.01f, size.y + 0.01f, 0.035f);
             col.isTrigger = true;

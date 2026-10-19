@@ -91,10 +91,11 @@ namespace TakXr.UI
             _root.SetParent(transform, false);
             _root.gameObject.SetActive(false);
 
-            Quad("Bg", _root, new Vector3(0f, 0f, 0.01f), new Vector2(PanelW, PanelH),
-                new Color(0.05f, 0.10f, 0.16f, 0.96f), 2995);
-            Quad("TopBar", _root, new Vector3(0f, PanelH / 2f - 0.006f, 0.005f),
-                new Vector2(PanelW, 0.012f), new Color(0.18f, 0.82f, 1f, 0.95f), 2997);
+            XrCurvedWidgets.CreateCurvedPanelPlate(
+                "CurvedBg", _root, PanelW, PanelH,
+                new Color(0.04f, 0.09f, 0.15f, 0.96f),
+                new Color(0.18f, 0.88f, 0.98f, 0.96f),
+                archHeight: 0.011f, depthWrap: 0.034f, renderQueue: 2995);
             _title = Text("Title", _root, new Vector3(-PanelW / 2f + 0.055f, PanelH / 2f - 0.052f, -0.01f),
                 "SETTINGS", 0.0086f, new Color(0.88f, 0.96f, 1f, 1f),
                 TextAnchor.MiddleLeft, TextAlignment.Left);

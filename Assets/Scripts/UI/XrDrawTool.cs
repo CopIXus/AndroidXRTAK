@@ -384,25 +384,21 @@ namespace TakXr.UI
             }
             _optsRoot = new GameObject("DrawOpts").transform;
             _optsRoot.SetParent(transform, false);
-            var bg = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            bg.name = "Bg";
-            bg.transform.SetParent(_optsRoot, false);
-            bg.transform.localPosition = new Vector3(0f, 0f, 0.008f);
-            bg.transform.localScale = new Vector3(0.88f, 0.115f, 1f);
-            Destroy(bg.GetComponent<Collider>());
-            var r = bg.GetComponent<Renderer>();
-            var mat = new Material(Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color"));
-            mat.color = new Color(0.03f, 0.07f, 0.13f, 0.95f);
-            mat.renderQueue = 2990;
-            r.sharedMaterial = mat;
-            _optsLabel = XrText.Make("Opts", _optsRoot, new Vector3(0f, 0.025f, -0.004f), "",
-                0.0044f, new Color(0.88f, 0.96f, 1f, 0.98f));
 
-            // Cycle buttons + Done/Close button
-            AddOptBtn("Aff", new Vector3(-0.30f, -0.024f, -0.002f), "AFF", CycleAffiliation);
-            AddOptBtn("Col", new Vector3(-0.10f, -0.024f, -0.002f), "COLOR", CycleStrokeColor);
-            AddOptBtn("Cs", new Vector3(0.10f, -0.024f, -0.002f), "NAME", CycleDrawCallsign);
-            AddOptBtn("Done", new Vector3(0.30f, -0.024f, -0.002f), "DONE / X", () =>
+            XrCurvedWidgets.CreateCurvedPanelPlate(
+                "CurvedDrawOptsPlate", _optsRoot, 0.88f, 0.125f,
+                new Color(0.04f, 0.09f, 0.15f, 0.94f),
+                new Color(0.18f, 0.88f, 0.98f, 0.96f),
+                archHeight: 0.010f, depthWrap: 0.028f, renderQueue: 2992);
+
+            _optsLabel = XrText.MakeWithShadow("Opts", _optsRoot, new Vector3(0f, 0.032f, -0.008f), "",
+                0.0042f, new Color(0.92f, 0.98f, 1f, 1f), maxWidthM: 0.80f);
+
+            // Curved cycle buttons + Done/Close button
+            AddOptBtn("Aff", -0.30f, -0.022f, "AFF", CycleAffiliation);
+            AddOptBtn("Col", -0.10f, -0.022f, "COLOR", CycleStrokeColor);
+            AddOptBtn("Cs", 0.10f, -0.022f, "NAME", CycleDrawCallsign);
+            AddOptBtn("Done", 0.30f, -0.022f, "DONE / X", () =>
             {
                 if ((_mode == Mode.Route || _mode == Mode.Polygon) && _verts.Count >= 2)
                     FinishShape();
@@ -411,27 +407,27 @@ namespace TakXr.UI
                     Cancel();
                     _flash?.Invoke("Draw closed");
                 }
-            });
+            }, isClose: true);
         }
 
-        void AddOptBtn(string id, Vector3 pos, string label, Action onClick)
+        void AddOptBtn(string id, float x, float y, string label, Action onClick, bool isClose = false)
         {
-            var t = new GameObject("Opt_" + id).transform;
-            t.SetParent(_optsRoot, false);
-            t.localPosition = pos;
-            var q = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            q.name = "Bg";
-            q.transform.SetParent(t, false);
-            q.transform.localScale = new Vector3(0.18f, 0.04f, 1f);
-            Destroy(q.GetComponent<Collider>());
-            var rr = q.GetComponent<Renderer>();
-            var m = new Material(Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color"));
-            m.color = new Color(0.14f, 0.28f, 0.4f, 0.96f);
-            m.renderQueue = 3000;
-            rr.sharedMaterial = m;
-            XrText.Make("L", t, new Vector3(0f, 0f, -0.004f), label, 0.0038f, Color.white);
+            XrCurvedWidgets.EvaluateArc(x, 0.44f, 0.010f, 0.028f, out var arcOff, out var arcRot);
+            Color fill = isClose
+                ? new Color(0.24f, 0.11f, 0.14f, 0.96f)
+                : new Color(0.09f, 0.19f, 0.30f, 0.96f);
+            Color border = isClose
+                ? new Color(0.95f, 0.34f, 0.36f, 0.90f)
+                : new Color(0.22f, 0.76f, 0.96f, 0.85f);
+
+            var t = XrCurvedWidgets.CreateRoundedButtonCard(
+                "Opt_" + id, _optsRoot, new Vector2(0.175f, 0.044f), fill, border, 3000);
+            t.localPosition = new Vector3(arcOff.x, y + arcOff.y * 0.5f, arcOff.z - 0.004f);
+            t.localRotation = arcRot;
+
+            XrText.MakeWithShadow("L", t, new Vector3(0f, 0f, -0.004f), label, 0.0036f, Color.white);
             var col = t.gameObject.AddComponent<BoxCollider>();
-            col.size = new Vector3(0.2f, 0.05f, 0.04f);
+            col.size = new Vector3(0.185f, 0.052f, 0.04f);
             col.isTrigger = true;
             var hit = t.gameObject.AddComponent<XrDrawOptHit>();
             hit.OnClick = onClick;
@@ -450,8 +446,8 @@ namespace TakXr.UI
             if (_mode == Mode.None || _cam == null || _optsRoot == null) return;
             if (!_optsRoot.gameObject.activeSelf) return;
             var camPos = _cam.position;
-            // Attach directly above the bottom dock as an integrated sub-bar instead of floating under the dock.
-            _optsRoot.position = camPos + _cam.TransformDirection(new Vector3(0f, -0.20f, 1.54f));
+            // Attach directly above the curved bottom dock with clean vertical clearance.
+            _optsRoot.position = camPos + _cam.TransformDirection(new Vector3(0f, -0.175f, 1.53f));
             _optsRoot.rotation = XrUiFacing.RotationFacingUser(_optsRoot.position, camPos);
 
             if (Time.unscaledTime < _nextOptClick) return;

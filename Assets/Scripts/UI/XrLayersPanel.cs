@@ -61,14 +61,17 @@ namespace TakXr.UI
             _root.SetParent(transform, false);
             _root.gameObject.SetActive(false);
 
-            Quad("Bg", _root, new Vector3(0f, 0f, 0.01f), new Vector2(PanelW, 0.72f),
-                new Color(0.05f, 0.10f, 0.16f, 0.96f), 2995);
+            XrCurvedWidgets.CreateCurvedPanelPlate(
+                "CurvedBg", _root, PanelW, 0.72f,
+                new Color(0.04f, 0.09f, 0.15f, 0.96f),
+                new Color(0.18f, 0.88f, 0.98f, 0.96f),
+                archHeight: 0.010f, depthWrap: 0.032f, renderQueue: 2995);
 
-            _title = Text("Title", _root, new Vector3(0f, 0.315f, -0.01f), "CHANNELS", 0.011f,
-                new Color(0.85f, 0.95f, 1f, 1f));
+            _title = Text("Title", _root, new Vector3(0f, 0.315f, -0.01f), "CHANNELS", 0.0095f,
+                new Color(0.88f, 0.97f, 1f, 1f));
 
-            _statusLine = Text("StatusLine", _root, new Vector3(0f, -0.315f, -0.01f), "", 0.006f,
-                new Color(0.7f, 0.85f, 1f, 0.9f));
+            _statusLine = Text("StatusLine", _root, new Vector3(0f, -0.315f, -0.01f), "", 0.0058f,
+                new Color(0.75f, 0.90f, 1f, 0.95f));
 
             _rowsRoot = new GameObject("Rows").transform;
             _rowsRoot.SetParent(_root, false);

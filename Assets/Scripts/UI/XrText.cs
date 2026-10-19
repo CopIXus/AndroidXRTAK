@@ -147,6 +147,56 @@ namespace TakXr.UI
             }
         }
 
+        /// <summary>
+        /// Create crisp world-space text with an automatic 3D drop shadow so text
+        /// reads cleanly over bright terrain without needing a dark background box.
+        /// </summary>
+        public static TextMesh MakeWithShadow(
+            string name,
+            Transform parent,
+            Vector3 localPos,
+            string msg,
+            float charSize64,
+            Color color,
+            TextAnchor anchor = TextAnchor.MiddleCenter,
+            TextAlignment alignment = TextAlignment.Center,
+            float maxWidthM = 0f,
+            float maxHeightM = 0f)
+        {
+            var tm = Make(name, parent, localPos, msg, charSize64, color, anchor, alignment, maxWidthM, maxHeightM);
+            var shadowGo = new GameObject(name + "_Shadow");
+            shadowGo.transform.SetParent(tm.transform, false);
+            float worldH = tm.characterSize * CrispFontSize * 0.1f;
+            shadowGo.transform.localPosition = new Vector3(worldH * 0.07f, -worldH * 0.08f, 0.002f);
+
+            var stm = shadowGo.AddComponent<TextMesh>();
+            stm.text = tm.text;
+            stm.fontSize = tm.fontSize;
+            stm.characterSize = tm.characterSize;
+            stm.anchor = tm.anchor;
+            stm.alignment = tm.alignment;
+            stm.color = new Color(0f, 0f, 0f, 0.94f);
+            stm.font = SharedFont;
+            ForceBilinear(SharedFont);
+
+            var sr = shadowGo.GetComponent<MeshRenderer>();
+            if (sr != null)
+            {
+                sr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                sr.receiveShadows = false;
+                if (sr.sharedMaterial != null)
+                    sr.material.renderQueue = 2999;
+            }
+            var mr = tm.GetComponent<MeshRenderer>();
+            if (mr != null && mr.sharedMaterial != null)
+                mr.material.renderQueue = 3002;
+
+            var fitter = tm.GetComponent<XrTextAutoFit>();
+            if (fitter != null)
+                fitter.BindShadow(stm);
+            return tm;
+        }
+
         public static void SetMaxBounds(TextMesh tm, float maxWidthM, float maxHeightM = 0f)
         {
             if (tm == null) return;
@@ -181,6 +231,7 @@ namespace TakXr.UI
     public sealed class XrTextAutoFit : MonoBehaviour
     {
         TextMesh _tm;
+        TextMesh _shadowTm;
         MeshRenderer _rend;
         float _baseCharSize;
         float _maxWidthM;
@@ -198,6 +249,12 @@ namespace TakXr.UI
             FitNow();
         }
 
+        public void BindShadow(TextMesh shadow)
+        {
+            _shadowTm = shadow;
+            SyncShadow();
+        }
+
         public void SetLimits(float maxWidthM, float maxHeightM = 0f)
         {
             _maxWidthM = maxWidthM;
@@ -211,24 +268,42 @@ namespace TakXr.UI
             if (_tm == null) return;
             if (_tm.text != _lastText)
                 FitNow();
+            else if (_shadowTm != null && _shadowTm.text != _tm.text)
+                SyncShadow();
         }
 
         public void FitNow()
         {
             if (_tm == null) return;
             _lastText = _tm.text;
-            if (_maxWidthM <= 0f && _maxHeightM <= 0f) return;
+            if (_maxWidthM <= 0f && _maxHeightM <= 0f)
+            {
+                SyncShadow();
+                return;
+            }
 
             _tm.characterSize = _baseCharSize;
-            if (string.IsNullOrEmpty(_lastText)) return;
+            if (string.IsNullOrEmpty(_lastText))
+            {
+                SyncShadow();
+                return;
+            }
             if (_rend == null) _rend = _tm.GetComponent<MeshRenderer>();
-            if (_rend == null) return;
+            if (_rend == null)
+            {
+                SyncShadow();
+                return;
+            }
 
             // Measure local bounds with current characterSize
             var b = _rend.localBounds;
             float w = b.size.x;
             float h = b.size.y;
-            if (w <= 1e-5f && h <= 1e-5f) return;
+            if (w <= 1e-5f && h <= 1e-5f)
+            {
+                SyncShadow();
+                return;
+            }
 
             float scale = 1f;
             if (_maxWidthM > 0f && w > _maxWidthM)
@@ -240,6 +315,17 @@ namespace TakXr.UI
             {
                 _tm.characterSize = _baseCharSize * Mathf.Max(scale, 0.42f);
             }
+            SyncShadow();
+        }
+
+        void SyncShadow()
+        {
+            if (_shadowTm == null || _tm == null) return;
+            _shadowTm.text = _tm.text;
+            _shadowTm.fontSize = _tm.fontSize;
+            _shadowTm.characterSize = _tm.characterSize;
+            float worldH = _tm.characterSize * _tm.fontSize * 0.1f;
+            _shadowTm.transform.localPosition = new Vector3(worldH * 0.065f, -worldH * 0.075f, 0.002f);
         }
     }
 }

@@ -78,9 +78,10 @@ namespace TakXr.Core
             yield return null;
             yield return null;
 
+            // Cannot yield inside try/catch (CS1626). Apply config first, then wire.
+            yield return LocalConfigLoader.ApplyAsync(config);
             try
             {
-                yield return LocalConfigLoader.ApplyAsync(config);
                 WireSystems();
                 ApplyOverviewFacingNorth();
             }
@@ -228,6 +229,9 @@ namespace TakXr.Core
             var serverPanel = XrServerPanel.Create();
             serverPanel.Configure(config, _direct, _layers, _feed, _cam.transform);
 
+            if (GetComponent<AppUpdateChecker>() == null)
+                gameObject.AddComponent<AppUpdateChecker>();
+
             var settingsPanel = XrSettingsPanel.Create();
             settingsPanel.Configure(config, _settings, _loco, _cam.transform,
                 msg => _chrome?.FlashStatus(msg),
@@ -255,6 +259,9 @@ namespace TakXr.Core
                 basemapPanel, serverPanel, settingsPanel, _radial, _cop, _info, _video,
                 goToPanel, videoBrowser, trackHistory, rangeTool, elevationTool,
                 chatContactsPanel, emergencyPanel, overlayManagerPanel, tacticalSuite);
+            var updateNotice = AppUpdateNotice.Create();
+            updateNotice.Configure(_cam.transform, msg => _chrome.FlashStatus(msg));
+
             serverPanel.SetFlashStatus(msg => _chrome.FlashStatus(msg));
             settingsPanel.SetFlashStatus(msg => _chrome.FlashStatus(msg));
             _drawTool.Configure(config, _feed, _direct, _world, _terrain, _cam.transform,

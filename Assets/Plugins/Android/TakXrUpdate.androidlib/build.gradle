@@ -1,0 +1,18 @@
+apply plugin: 'com.android.library'
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+}
+
+android {
+    namespace "us.copix.takxr.update"
+    compileSdkVersion 34
+    defaultConfig {
+        minSdkVersion 28
+        targetSdkVersion 34
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}

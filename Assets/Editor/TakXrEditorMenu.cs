@@ -236,6 +236,28 @@ namespace TakXr.Editor
                 if (ndk == null && Directory.Exists(unityNdk))
                     ndk = unityNdk;
 
+                string jdk = null;
+                if (Directory.Exists(unityJdk))
+                    jdk = unityJdk;
+                else
+                {
+                    var javaHome = System.Environment.GetEnvironmentVariable("JAVA_HOME");
+                    if (!string.IsNullOrEmpty(javaHome) && Directory.Exists(javaHome))
+                        jdk = javaHome;
+                    else
+                    {
+                        var adoptium = Path.Combine(
+                            System.Environment.GetFolderPath(System.Environment.SpecialFolder.ProgramFiles),
+                            "Eclipse Adoptium");
+                        if (Directory.Exists(adoptium))
+                        {
+                            var jdks = Directory.GetDirectories(adoptium, "jdk-17*");
+                            if (jdks.Length > 0)
+                                jdk = jdks[jdks.Length - 1];
+                        }
+                    }
+                }
+
                 var toolsType = FindType("UnityEditor.Android.AndroidExternalToolsSettings", "UnityEditor.Android.Extensions");
                 if (toolsType != null)
                 {
@@ -247,17 +269,17 @@ namespace TakXr.Editor
                     }
                     SetPath("sdkRootPath", sdk);
                     SetPath("ndkRootPath", ndk);
-                    SetPath("jdkRootPath", Directory.Exists(unityJdk) ? unityJdk : null);
+                    SetPath("jdkRootPath", jdk);
                 }
 
                 if (!string.IsNullOrEmpty(sdk))
                     EditorPrefs.SetString("AndroidSdkRoot", sdk);
                 if (!string.IsNullOrEmpty(ndk))
                     EditorPrefs.SetString("AndroidNdkRoot", ndk);
-                if (Directory.Exists(unityJdk))
-                    EditorPrefs.SetString("JdkPath", unityJdk);
+                if (!string.IsNullOrEmpty(jdk))
+                    EditorPrefs.SetString("JdkPath", jdk);
 
-                Debug.Log($"[TakXr] Android tools sdk={sdk} ndk={ndk} jdk={(Directory.Exists(unityJdk) ? unityJdk : "default")}");
+                Debug.Log($"[TakXr] Android tools sdk={sdk} ndk={ndk} jdk={(jdk ?? "default")}");
             }
             catch (System.Exception ex)
             {

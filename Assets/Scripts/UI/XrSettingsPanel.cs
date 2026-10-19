@@ -16,7 +16,7 @@ namespace TakXr.UI
     public class XrSettingsPanel : MonoBehaviour
     {
         const float PanelW = 0.92f;
-        const float PanelH = 0.88f;
+        const float PanelH = 1.08f;
         const int CallsignMaxLen = 24;
 
         AppConfig _config;
@@ -66,6 +66,19 @@ namespace TakXr.UI
             _onOriginHere = onOriginHere;
             _onFitTracks = onFitTracks;
             _selfPresence = selfPresence;
+            if (AppUpdateChecker.Instance != null)
+                AppUpdateChecker.Instance.Changed += OnUpdateChanged;
+        }
+
+        void OnDestroy()
+        {
+            if (AppUpdateChecker.Instance != null)
+                AppUpdateChecker.Instance.Changed -= OnUpdateChanged;
+        }
+
+        void OnUpdateChanged()
+        {
+            if (IsVisible) RebuildUi();
         }
 
         public void SetFlashStatus(Action<string> flash) => _flash = flash;
@@ -177,6 +190,32 @@ namespace TakXr.UI
                 _loco?.SetSnapTurnEnabled(_settings != null && _settings.SnapTurnEnabled);
                 RebuildUi();
             });
+
+            var updates = AppUpdateChecker.Instance;
+            var latest = updates != null ? updates.LatestLabel : "…";
+            var updateState = updates != null ? updates.StatusMessage : "Checking for updates…";
+            RowLabel(ref y, "App  v" + Application.version + "   latest " + latest);
+            LeftLabel(updateState, new Vector3(-PanelW / 2f + 0.06f, y, -0.01f));
+            AddButton("CheckUpdate", new Vector3(0.16f, y, -0.01f), new Vector2(0.16f, 0.045f),
+                "Check", false, () =>
+                {
+                    AppUpdateChecker.Instance?.CheckNow();
+                    _flash?.Invoke("Checking GitHub…");
+                });
+            AddButton("InstallUpdate", new Vector3(0.34f, y, -0.01f), new Vector2(0.16f, 0.045f),
+                "Install", updates != null && updates.UpdateAvailable, () =>
+                {
+                    if (AppUpdateChecker.Instance == null || !AppUpdateChecker.Instance.UpdateAvailable)
+                    {
+                        _flash?.Invoke(AppUpdateChecker.Instance != null
+                            ? AppUpdateChecker.Instance.StatusMessage
+                            : "No update");
+                        return;
+                    }
+                    AppUpdateChecker.Instance.BeginInstall();
+                    _flash?.Invoke("Downloading update…");
+                });
+            y -= 0.065f;
 
             float by = -PanelH / 2f + 0.12f;
             AddButton("Origin", new Vector3(-0.32f, by, -0.01f), new Vector2(0.26f, 0.05f),

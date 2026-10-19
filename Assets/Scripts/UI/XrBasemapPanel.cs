@@ -136,10 +136,11 @@ namespace TakXr.UI
             Quad("Bg", row, Vector3.zero, new Vector2(PanelW - 0.06f, RowH - 0.01f),
                 new Color(0.10f, 0.18f, 0.27f, 0.95f), 3000);
 
-            var nameTm = Text("Name", row, new Vector3(-PanelW / 2f + 0.06f, 0f, -0.008f),
-                label, 0.0085f, Color.white);
+            var nameTm = Text("Name", row, new Vector3(-PanelW / 2f + 0.055f, 0f, -0.008f),
+                label, 0.0068f, Color.white);
             nameTm.anchor = TextAnchor.MiddleLeft;
             nameTm.alignment = TextAlignment.Left;
+            XrText.SetMaxBounds(nameTm, PanelW - 0.28f, RowH * 0.78f);
 
             var chip = new GameObject("Chip").transform;
             chip.SetParent(row, false);

@@ -5,16 +5,23 @@ using UnityEngine;
 namespace TakXr.Locomotion
 {
     /// <summary>
-    /// Google Maps immersive-style locomotion: stick fly, trigger/pinch drag-pan,
-    /// two-hand stretch zoom, and upright God's-Eye Wall/Desk tilt.
-    /// Moves <see cref="XrWorldRoot"/> along its own surface plane (<c>Root.up</c>)
-    /// so controller navigation stays natural whether the Earth is flat below you (0°)
-    /// or tilted up in front of you (38° Desk / 62° Wall View).
+    /// Google Maps XR-style fluid locomotion (works identically with bare hands+eyes OR controllers):
+    /// 1. Single-Hand Pinch / Trigger Grab-and-Pull:
+    ///    - Locks onto the terrain point you are looking/pointing at and pulls the Earth
+    ///      with your hand + ray motion (with smooth release momentum/inertia like Google Maps).
+    /// 2. Two-Hand Pinch / Trigger Manipulation:
+    ///    - Pull hands apart / push together to Zoom / Scale about the focus point in front of you.
+    ///    - Twist hands horizontally like a steering wheel to Rotate the map around its surface normal.
+    ///    - Lift / lower both hands together to smoothly Tilt the Earth up in front of you (0° to 62° Wall View)
+    ///      without needing any controller buttons!
+    /// 3. Physical Controller Thumbsticks (when controllers are held):
+    ///    - Left stick glides along the tilted map surface plane; Right stick zooms &amp; yaws; B/Y + stick tilts.
     /// </summary>
     public class XrWorldLocomotion : MonoBehaviour
     {
-        const float DragThresholdM = 0.003f;
+        const float DragThresholdM = 0.0025f;
         const float StickDeadzone = 0.12f;
+        const float InertiaDamping = 6.5f;
 
         static readonly float[] TiltPresetDegs = { 0f, 38f, 62f };
 
@@ -26,6 +33,8 @@ namespace TakXr.Locomotion
         {
             public bool grabbing;
             public Vector3 lastPos;
+            public Vector3 lastRayHit;
+            public bool hasRayHit;
             public float moved;
         }
 
@@ -34,6 +43,8 @@ namespace TakXr.Locomotion
         Vector3 _prevMid;
         float _prevDist;
         float _prevAngle;
+        float _prevAvgY;
+        Vector3 _panVelocity;
         float _speedMul = 1f;
         bool _snapTurnEnabled;
         float _snapCooldown;
@@ -74,9 +85,25 @@ namespace TakXr.Locomotion
             navigated |= UpdateThumbsticks();
             navigated |= UpdateSnapTurn();
             navigated |= UpdatePinchAndControllers();
+            navigated |= UpdateInertia();
             navigated |= UpdateKeyboardFallback();
 
             if (navigated) map?.NotifyMoving(true);
+        }
+
+        bool UpdateInertia()
+        {
+            if (_grabs[0].grabbing || _grabs[1].grabbing) return false;
+            if (_panVelocity.sqrMagnitude < 0.04f)
+            {
+                _panVelocity = Vector3.zero;
+                return false;
+            }
+            var mapUp = world.Root.up;
+            _panVelocity = Vector3.ProjectOnPlane(_panVelocity, mapUp);
+            world.Root.position += _panVelocity * Time.deltaTime;
+            _panVelocity = Vector3.Lerp(_panVelocity, Vector3.zero, Mathf.Clamp01(InertiaDamping * Time.deltaTime));
+            return true;
         }
 
         bool UpdateSnapTurn()
@@ -143,6 +170,20 @@ namespace TakXr.Locomotion
             return true;
         }
 
+        bool TryIntersectMapPlane(int handIndex, out Vector3 planeHit)
+        {
+            planeHit = Vector3.zero;
+            if (world == null || !XrHandPinchInput.TryGetAim(handIndex, out var origin, out var fwd))
+                return false;
+            var mapUp = world.Root.up;
+            float denom = Vector3.Dot(fwd, mapUp);
+            if (Mathf.Abs(denom) < 0.06f) return false;
+            float t = Vector3.Dot(world.Root.position - origin, mapUp) / denom;
+            if (t <= 0.2f || t > 18000f) return false;
+            planeHit = origin + fwd * t;
+            return true;
+        }
+
         bool UpdatePinchAndControllers()
         {
             var positions = new Vector3[2];
@@ -155,7 +196,7 @@ namespace TakXr.Locomotion
                                 !XrHandPinchInput.IsUiBlocking(i) &&
                                 !TakXr.UI.XrDrawTool.IsArmed &&
                                 !TakXr.UI.XrRangeMeasureTool.IsArmed &&
-                                !TakXr.UI.XrElevationTool.IsArmed; // tool pinches must not drag the map
+                                !TakXr.UI.XrElevationTool.IsArmed;
 
                 ref var g = ref _grabs[i];
                 if (wantGrab)
@@ -165,6 +206,8 @@ namespace TakXr.Locomotion
                         g.grabbing = true;
                         g.moved = 0f;
                         g.lastPos = pos;
+                        g.hasRayHit = TryIntersectMapPlane(i, out g.lastRayHit);
+                        _panVelocity = Vector3.zero;
                     }
                     active.Add(i);
                     positions[i] = pos;
@@ -172,6 +215,7 @@ namespace TakXr.Locomotion
                 else if (g.grabbing)
                 {
                     g.grabbing = false;
+                    g.hasRayHit = false;
                     _twoHand = false;
                 }
             }
@@ -185,18 +229,39 @@ namespace TakXr.Locomotion
                 int i = active[0];
                 ref var g = ref _grabs[i];
                 var pos = positions[i];
-                var delta = pos - g.lastPos;
-                g.moved += delta.magnitude;
-                if (delta.sqrMagnitude > 1e-10f && g.moved > DragThresholdM)
+                var handDelta = pos - g.lastPos;
+                g.moved += handDelta.magnitude;
+                g.lastPos = pos;
+
+                // Combine direct 3D hand translation with subtle ray-anchor pull (Google Maps XR feel):
+                // moving your hand in 3D space slides the Earth 1:1 with altitude-scaled gain,
+                // and sweeping your wrist/ray across the map adds responsive long-range reach.
+                var worldDelta = Vector3.ProjectOnPlane(handDelta, mapUp) * gain;
+
+                if (TryIntersectMapPlane(i, out var curRayHit))
                 {
-                    // Pan strictly along the Earth's surface plane (Root.up) so dragging
-                    // when the map is tilted in front of you slides the map without changing altitude.
-                    var planeDelta = Vector3.ProjectOnPlane(delta, mapUp);
-                    world.Root.position += planeDelta * gain;
-                    g.lastPos = pos;
+                    if (g.hasRayHit)
+                    {
+                        var rayDelta = Vector3.ProjectOnPlane(curRayHit - g.lastRayHit, mapUp);
+                        // Blend 35% ray delta clamped so wrist micro-jitter never jumps the map
+                        float maxStep = ViewerHeight() * 0.18f;
+                        if (rayDelta.magnitude > maxStep)
+                            rayDelta = rayDelta.normalized * maxStep;
+                        worldDelta += rayDelta * 0.35f;
+                    }
+                    g.lastRayHit = curRayHit;
+                    g.hasRayHit = true;
+                }
+
+                if (worldDelta.sqrMagnitude > 1e-8f && g.moved > DragThresholdM)
+                {
+                    world.Root.position += worldDelta;
+                    float dt = Mathf.Max(Time.deltaTime, 0.004f);
+                    _panVelocity = Vector3.Lerp(_panVelocity, worldDelta / dt, 0.45f);
+                    // Re-sample ray anchor after moving the world so it doesn't feed back
+                    g.hasRayHit = TryIntersectMapPlane(i, out g.lastRayHit);
                     return true;
                 }
-                g.lastPos = pos;
             }
             else if (active.Count == 2)
             {
@@ -204,7 +269,9 @@ namespace TakXr.Locomotion
                 var b = positions[active[1]];
                 var mid = (a + b) * 0.5f;
                 float dist = Vector3.Distance(a, b);
+                // Measure hand-to-hand angle on the horizontal plane for natural steering-wheel rotation
                 float angle = Mathf.Atan2(a.x - b.x, a.z - b.z);
+                float avgY = (a.y + b.y) * 0.5f;
 
                 if (!_twoHand)
                 {
@@ -212,35 +279,74 @@ namespace TakXr.Locomotion
                     _prevMid = mid;
                     _prevDist = Mathf.Max(dist, 1e-4f);
                     _prevAngle = angle;
+                    _prevAvgY = avgY;
+                    _panVelocity = Vector3.zero;
                 }
                 else
                 {
                     bool moved = false;
+                    var focusPivot = world.GetFocusPivot(cameraTransform);
+
+                    // 1. Two-hand Pan along map plane
                     var midDelta = Vector3.ProjectOnPlane(mid - _prevMid, mapUp);
-                    if (midDelta.sqrMagnitude > 0f)
+                    if (midDelta.sqrMagnitude > 1e-8f)
                     {
                         world.Root.position += midDelta * gain;
                         moved = true;
                     }
-                    if (_prevDist > 1e-4f && dist > 1e-4f)
+
+                    // 2. Two-hand Stretch / Pinch Zoom about the map focus point in front of the viewer
+                    //    (so zooming with your hands in your lap zooms the map in front of your eyes,
+                    //    not the air around your waist!)
+                    if (_prevDist > 0.03f && dist > 0.03f)
                     {
-                        float factor = dist / _prevDist;
-                        if (Mathf.Abs(factor - 1f) > 1e-4f)
+                        float rawFactor = dist / _prevDist;
+                        // Exaggerate stretch slightly (1.45x) so comfortable hand motion zooms quickly
+                        float factor = 1f + (rawFactor - 1f) * 1.45f;
+                        if (Mathf.Abs(factor - 1f) > 0.0015f)
                         {
-                            world.ScaleAboutPoint(mid, factor);
+                            // In standard 1:1 DEM mode, zoom by moving the world along mapUp (altitude)
+                            // so DEM LOD rings refine naturally; in Tabletop mode, scale the miniature.
+                            bool isTabletop = TakXr.UI.XrTacticalToolsSuite.Instance != null &&
+                                              TakXr.UI.XrTacticalToolsSuite.Instance.IsTabletopActive;
+                            if (isTabletop)
+                            {
+                                world.ScaleAboutPoint(focusPivot, factor);
+                            }
+                            else
+                            {
+                                // Pull hands apart (factor > 1) -> zoom IN (move closer to focusPivot)
+                                float zoomStep = Mathf.Clamp(factor - 1f, -0.25f, 0.25f);
+                                var toPivot = cameraTransform.position - focusPivot;
+                                world.Root.position += toPivot * (zoomStep * 1.35f);
+                            }
                             moved = true;
                         }
                     }
+
+                    // 3. Two-hand Twist -> Rotate map around its surface normal
                     float dAngle = Mathf.DeltaAngle(_prevAngle * Mathf.Rad2Deg, angle * Mathf.Rad2Deg) * Mathf.Deg2Rad;
-                    if (Mathf.Abs(dAngle) > 1e-4f)
+                    if (Mathf.Abs(dAngle) > 0.002f)
                     {
-                        world.RotateAboutMapUp(mid, dAngle);
+                        world.RotateAboutMapUp(focusPivot, dAngle);
+                        moved = true;
+                    }
+
+                    // 4. Controller-free Two-Hand Vertical Lift/Lower -> Smoothly Tilt the Earth!
+                    //    Lifting both pinched hands upward tilts the far horizon UP into Wall View;
+                    //    lowering both hands flattens it back toward 0°.
+                    float dy = avgY - _prevAvgY;
+                    if (Mathf.Abs(dy) > 0.0015f)
+                    {
+                        ApplyPitchDelta(dy * 165f);
+                        _onPitchChanged?.Invoke(_savedPitchDeg);
                         moved = true;
                     }
 
                     _prevMid = mid;
                     _prevDist = dist;
                     _prevAngle = angle;
+                    _prevAvgY = avgY;
                     return moved;
                 }
             }
@@ -332,14 +438,11 @@ namespace TakXr.Locomotion
             bool navigated = false;
             bool hasRight = XrHandPinchInput.HasStick(1);
 
-            // Left stick: pan across the Earth's surface plane (mapFwd / mapRight).
-            // When the Earth is tilted up in front of you, pushing the stick forward
-            // slides the terrain across the tilted plane rather than driving it into your face!
             if (XrHandPinchInput.TryGetStick(0, out var left) && left.magnitude > StickDeadzone)
             {
+                _panVelocity = Vector3.zero;
                 if (tilting)
                 {
-                    // Y is consumed by world tilt; keep strafe on X.
                     if (Mathf.Abs(left.x) > StickDeadzone)
                     {
                         world.Root.position += (-mapRight * left.x) * speed;
@@ -353,10 +456,10 @@ namespace TakXr.Locomotion
                 }
             }
 
-            // Right stick: zoom/altitude along map surface normal (mapUp) + yaw around mapUp.
             if (hasRight && XrHandPinchInput.TryGetStick(1, out var rstick) &&
                 rstick.magnitude > StickDeadzone)
             {
+                _panVelocity = Vector3.zero;
                 if (!tilting && Mathf.Abs(rstick.y) > StickDeadzone)
                     world.Root.position += (-mapUp) * (rstick.y * speed);
                 if (!_snapTurnEnabled && Mathf.Abs(rstick.x) > StickDeadzone)
@@ -379,11 +482,6 @@ namespace TakXr.Locomotion
             right = Vector3.Cross(Vector3.up, flatFwd).normalized;
         }
 
-        /// <summary>
-        /// Computes camera-aligned forward and right vectors projected onto the Earth's
-        /// current surface plane (<c>world.Root.up</c>). At 0° pitch this equals horizontal
-        /// ground movement; at 38°–62° pitch it glides smoothly along the tilted map wall.
-        /// </summary>
         void MapSurfaceBasis(out Vector3 mapFwd, out Vector3 mapRight, out Vector3 mapUp)
         {
             mapUp = world != null ? world.Root.up : Vector3.up;
@@ -398,10 +496,6 @@ namespace TakXr.Locomotion
             mapFwd.Normalize();
         }
 
-        /// <summary>
-        /// Height above the map plane along map-local up. Stable when the world
-        /// is pitched — unlike camera.y - origin.y which jumps with tilt.
-        /// </summary>
         float ViewerHeight()
         {
             var up = world.Root.up;
@@ -409,7 +503,7 @@ namespace TakXr.Locomotion
             return Mathf.Clamp(Mathf.Abs(h), 8f, 8000f);
         }
 
-        float PanGain() => Mathf.Clamp(ViewerHeight() * 0.45f, 2f, 4000f);
+        float PanGain() => Mathf.Clamp(ViewerHeight() * 0.72f, 3f, 5000f);
 
         float MoveSpeed() => Mathf.Clamp(ViewerHeight() * 1.6f * _speedMul, 8f, 12000f);
 
@@ -434,13 +528,16 @@ namespace TakXr.Locomotion
         {
             if (world == null || cameraTransform == null) return;
             var pivot = world.GetFocusPivot(cameraTransform);
-            world.ScaleAboutPoint(pivot, factor);
+            var toPivot = cameraTransform.position - pivot;
+            float zoomStep = Mathf.Clamp(factor - 1f, -0.5f, 0.5f);
+            world.Root.position += toPivot * zoomStep;
             map?.NotifyMoving(true);
         }
 
         public void ResetView()
         {
             if (world == null || cameraTransform == null) return;
+            _panVelocity = Vector3.zero;
             world.Root.localScale = Vector3.one;
             world.ApplyInitialOverview(cameraTransform, 160f, 50f);
             world.OrientNorth(cameraTransform);
@@ -448,16 +545,15 @@ namespace TakXr.Locomotion
             map?.NotifyMoving(true);
         }
 
-        /// <summary>Frame the world so <paramref name="worldPoint"/> sits at a comfortable overview.</summary>
         public void FrameWorldPoint(Vector3 worldPoint, float overviewDistM = 160f, float heightM = 50f)
         {
             if (world == null || cameraTransform == null) return;
+            _panVelocity = Vector3.zero;
             float pitch = _savedPitchDeg;
             world.Flatten(cameraTransform);
             world.Root.localScale = Vector3.one;
             var camPos = cameraTransform.position;
             FlatBasis(out var flatFwd, out _);
-            // Place world so target is ahead of the HMD at overviewDist.
             var desiredMarker = camPos + flatFwd * overviewDistM + Vector3.down * heightM;
             world.Root.position += desiredMarker - worldPoint;
             world.OrientNorth(cameraTransform);
@@ -466,7 +562,6 @@ namespace TakXr.Locomotion
             map?.NotifyMoving(true);
         }
 
-        /// <summary>Scale/position world so all given marker world positions fit in view.</summary>
         public void FitWorldPoints(System.Collections.Generic.IList<Vector3> points)
         {
             if (world == null || cameraTransform == null || points == null || points.Count == 0)

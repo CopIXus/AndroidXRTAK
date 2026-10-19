@@ -48,6 +48,7 @@ namespace TakXr.Core
         {
             Application.targetFrameRate = 72;
             QualitySettings.vSyncCount = 0;
+            RequestAndroidXrPermissions();
             _boot = BootHud.Create();
             _boot.SetStatus("TAKXR", "Booting…");
 
@@ -331,6 +332,36 @@ namespace TakXr.Core
             var pts = new System.Collections.Generic.List<UnityEngine.Vector3>(64);
             _cotLayer.CollectVisibleWorldPositions(pts);
             _loco.FitWorldPoints(pts);
+        }
+
+        static void RequestAndroidXrPermissions()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                string[] perms =
+                {
+                    "android.permission.HAND_TRACKING",
+                    "android.permission.EYE_TRACKING_FINE",
+                    "android.permission.EYE_TRACKING_COARSE",
+                };
+                var missing = new System.Collections.Generic.List<string>();
+                foreach (var p in perms)
+                {
+                    if (!UnityEngine.Android.Permission.HasUserAuthorizedPermission(p))
+                        missing.Add(p);
+                }
+                if (missing.Count > 0)
+                {
+                    Debug.Log("[TakXr] Requesting Android XR runtime permissions: " + string.Join(", ", missing));
+                    UnityEngine.Android.Permission.RequestUserPermissions(missing.ToArray());
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[TakXr] RequestAndroidXrPermissions: " + ex.Message);
+            }
+#endif
         }
 
         static void EnsureLighting()

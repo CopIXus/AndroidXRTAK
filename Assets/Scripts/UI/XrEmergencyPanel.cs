@@ -173,9 +173,10 @@ namespace TakXr.UI
             foreach (Transform child in _contentRoot) Destroy(child.gameObject);
             _hitTargets.Clear();
 
-            Text("Title", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, PanelH / 2f - 0.048f, -0.01f),
-                _casevacTab ? "9-LINE CASEVAC / MEDEVAC REQUEST" : "ATAK EMERGENCY BEACON (911 ALERT)",
-                0.0085f, new Color(1f, 0.88f, 0.88f, 1f), TextAnchor.MiddleLeft, TextAlignment.Left);
+            var titleTm = Text("Title", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, PanelH / 2f - 0.048f, -0.01f),
+                _casevacTab ? "9-LINE CASEVAC REQUEST" : "EMERGENCY BEACON (911)",
+                0.0066f, new Color(1f, 0.88f, 0.88f, 1f), TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(titleTm, 0.48f, 0.042f);
 
             AddButton("TabEm", new Vector3(0.11f, PanelH / 2f - 0.048f, -0.01f),
                 new Vector2(0.19f, 0.048f), "911 Beacon", !_casevacTab, () =>

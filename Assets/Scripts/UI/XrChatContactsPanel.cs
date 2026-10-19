@@ -169,10 +169,11 @@ namespace TakXr.UI
             foreach (Transform child in _contentRoot) Destroy(child.gameObject);
             _hitTargets.Clear();
 
-            // Header + Tab Bar
-            Text("Title", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, PanelH / 2f - 0.048f, -0.01f),
-                _chatTab ? $"GEOCHAT  ·  {_activeChatroom}" : "TACTICAL CONTACTS & TEAM",
-                0.0088f, new Color(0.88f, 0.96f, 1f, 1f), TextAnchor.MiddleLeft, TextAlignment.Left);
+            // Header + Tab Bar (Title bounded to 0.50m so it never collides with Contacts/GeoChat tabs)
+            var titleTm = Text("Title", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, PanelH / 2f - 0.048f, -0.01f),
+                _chatTab ? $"GEOCHAT  ·  {_activeChatroom}" : "TACTICAL CONTACTS",
+                0.0068f, new Color(0.88f, 0.96f, 1f, 1f), TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(titleTm, 0.50f, 0.042f);
 
             AddButton("TabContacts", new Vector3(0.11f, PanelH / 2f - 0.048f, -0.01f),
                 new Vector2(0.19f, 0.048f), "Contacts", !_chatTab, () =>
@@ -244,11 +245,13 @@ namespace TakXr.UI
                     ? $"[{c.detail.team.name}] "
                     : "";
                 string distBrg = FormatDistanceBearing(c);
-                Text("Cs_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y + 0.011f, -0.01f),
-                    $"{c.Callsign}", 0.0076f, Color.white, TextAnchor.MiddleLeft, TextAlignment.Left);
-                Text("Meta_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y - 0.014f, -0.01f),
-                    $"{teamStr}{c.type}  ·  {distBrg}", 0.0058f,
+                var csTm = Text("Cs_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y + 0.012f, -0.01f),
+                    $"{c.Callsign}", 0.0062f, Color.white, TextAnchor.MiddleLeft, TextAlignment.Left);
+                XrText.SetMaxBounds(csTm, 0.44f, 0.030f);
+                var metaTm = Text("Meta_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y - 0.014f, -0.01f),
+                    $"{teamStr}{c.type}  ·  {distBrg}", 0.0048f,
                     new Color(0.68f, 0.84f, 0.96f, 0.92f), TextAnchor.MiddleLeft, TextAlignment.Left);
+                XrText.SetMaxBounds(metaTm, 0.44f, 0.026f);
 
                 var captured = c;
                 AddButton("GoTo_" + i, new Vector3(0.08f, y, -0.01f), new Vector2(0.13f, 0.048f),
@@ -283,9 +286,10 @@ namespace TakXr.UI
         void BuildChatView()
         {
             float y = PanelH / 2f - 0.115f;
-            Text("RoomInfo", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, y, -0.01f),
-                $"Room: {_activeChatroom}   (CoT b-t-f over TAK TLS)",
-                0.0066f, new Color(0.65f, 0.85f, 1f, 0.95f), TextAnchor.MiddleLeft, TextAlignment.Left);
+            var roomTm = Text("RoomInfo", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, y, -0.01f),
+                $"Room: {_activeChatroom}  (CoT b-t-f)",
+                0.0056f, new Color(0.65f, 0.85f, 1f, 0.95f), TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(roomTm, 0.50f, 0.036f);
 
             AddButton("SwitchAll", new Vector3(0.16f, y, -0.01f), new Vector2(0.20f, 0.044f),
                 "All Rooms", _activeChatroom == "All Chat Rooms", () =>

@@ -303,11 +303,13 @@ namespace TakXr.UI
                 !string.Equals(entry.displayName, entry.host, StringComparison.OrdinalIgnoreCase))
                 sub = Trunc(entry.displayName, 18) + "  ·  " + sub;
 
-            Text("Host", row, new Vector3(-PanelW / 2f + 0.13f, 0.016f, -0.008f),
-                title, 0.0068f, Color.white, TextAnchor.MiddleLeft, TextAlignment.Left);
-            Text("Sub", row, new Vector3(-PanelW / 2f + 0.13f, -0.012f, -0.008f),
-                sub, 0.0048f, new Color(0.70f, 0.82f, 0.92f, 0.92f),
+            var hostTm = Text("Host", row, new Vector3(-PanelW / 2f + 0.13f, 0.016f, -0.008f),
+                title, 0.0062f, Color.white, TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(hostTm, 0.46f, 0.028f);
+            var subTm = Text("Sub", row, new Vector3(-PanelW / 2f + 0.13f, -0.012f, -0.008f),
+                sub, 0.0046f, new Color(0.70f, 0.82f, 0.92f, 0.92f),
                 TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(subTm, 0.46f, 0.024f);
 
             var badgeGo = new GameObject("Badge").transform;
             badgeGo.SetParent(row, false);

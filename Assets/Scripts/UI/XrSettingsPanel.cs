@@ -93,8 +93,12 @@ namespace TakXr.UI
 
             Quad("Bg", _root, new Vector3(0f, 0f, 0.01f), new Vector2(PanelW, PanelH),
                 new Color(0.05f, 0.10f, 0.16f, 0.96f), 2995);
-            _title = Text("Title", _root, new Vector3(0f, PanelH / 2f - 0.05f, -0.01f),
-                "SETTINGS", 0.011f, new Color(0.85f, 0.95f, 1f, 1f));
+            Quad("TopBar", _root, new Vector3(0f, PanelH / 2f - 0.006f, 0.005f),
+                new Vector2(PanelW, 0.012f), new Color(0.18f, 0.82f, 1f, 0.95f), 2997);
+            _title = Text("Title", _root, new Vector3(-PanelW / 2f + 0.055f, PanelH / 2f - 0.052f, -0.01f),
+                "SETTINGS", 0.0086f, new Color(0.88f, 0.96f, 1f, 1f),
+                TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(_title, PanelW - 0.22f);
             _rowsRoot = new GameObject("Rows").transform;
             _rowsRoot.SetParent(_root, false);
         }
@@ -119,30 +123,33 @@ namespace TakXr.UI
             foreach (Transform child in _rowsRoot) Destroy(child.gameObject);
             _hitTargets.Clear();
 
-            AddButton("Close", new Vector3(PanelW / 2f - 0.05f, PanelH / 2f - 0.05f, -0.01f),
-                new Vector2(0.07f, 0.05f), "X", false, Hide);
+            AddButton("Close", new Vector3(PanelW / 2f - 0.055f, PanelH / 2f - 0.052f, -0.01f),
+                new Vector2(0.068f, 0.048f), "X", false, Hide);
 
             var id = TakIdentity.Load();
-            float y = PanelH / 2f - 0.14f;
+            float y = PanelH / 2f - 0.130f;
 
-            // Callsign is free text only (no preset "<>" cycling) — tap the value
-            // or the Edit button to type one on the keyboard.
-            RowLabel(ref y, "Callsign  " + Trunc(id.callsign, 16));
-            AddHitRegion("CsTap", new Vector3(-0.17f, y + 0.055f, -0.01f),
-                new Vector2(0.5f, 0.05f), EditCallsign);
-            AddButton("CsEdit", new Vector3(0.36f, y + 0.055f, -0.01f), new Vector2(0.15f, 0.045f),
+            // Callsign row (value + Edit button on the same row)
+            LeftLabel("Callsign:  " + Trunc(id.callsign, 18), new Vector3(-PanelW / 2f + 0.055f, y, -0.01f), 0.56f);
+            AddHitRegion("CsTap", new Vector3(-0.15f, y, -0.01f),
+                new Vector2(0.50f, 0.052f), EditCallsign);
+            AddButton("CsEdit", new Vector3(0.32f, y, -0.01f), new Vector2(0.18f, 0.046f),
                 "Edit", false, EditCallsign);
+            y -= 0.068f;
 
-            RowLabel(ref y, "Team  " + id.team);
-            AddButton("TeamPrev", new Vector3(0.22f, y + 0.055f, -0.01f), new Vector2(0.08f, 0.045f),
+            // Team row (value + < > buttons on the same row)
+            LeftLabel("Team:  " + id.team, new Vector3(-PanelW / 2f + 0.055f, y, -0.01f), 0.52f);
+            AddButton("TeamPrev", new Vector3(0.24f, y, -0.01f), new Vector2(0.085f, 0.046f),
                 "<", false, () => { TakIdentity.CycleTeam(-1); RebuildUi(); });
-            AddButton("TeamNext", new Vector3(0.34f, y + 0.055f, -0.01f), new Vector2(0.08f, 0.045f),
+            AddButton("TeamNext", new Vector3(0.35f, y, -0.01f), new Vector2(0.085f, 0.046f),
                 ">", false, () => { TakIdentity.CycleTeam(+1); RebuildUi(); });
+            y -= 0.068f;
 
-            // Read-only: self publishes as a VR observer (sensor point), not a
-            // ground unit — see TakIdentity.ObserverCotType.
-            RowLabel(ref y, "Self type  " + (id.cotType == TakIdentity.ObserverCotType
-                ? TakIdentity.ObserverTypeLabel : id.cotType));
+            // Read-only self type
+            LeftLabel("Self type:  " + (id.cotType == TakIdentity.ObserverCotType
+                ? TakIdentity.ObserverTypeLabel : id.cotType),
+                new Vector3(-PanelW / 2f + 0.055f, y, -0.01f), PanelW - 0.12f);
+            y -= 0.068f;
 
             float iconScale = _settings != null ? _settings.IconScaleMultiplier : 1f;
             float textScale = _settings != null ? _settings.TextScaleMultiplier : 1f;
@@ -150,25 +157,25 @@ namespace TakXr.UI
             bool fallback = _config != null && _config.allowBackendFallback;
             bool snap = _settings != null && _settings.SnapTurnEnabled;
 
-            RowCycle(ref y, $"Icon size  x{iconScale:0.##}", () =>
+            RowCycle(ref y, $"Icon size:  x{iconScale:0.##}", () =>
             {
                 _settings?.CycleIconScale();
                 CotMarkerView.ScaleMultiplier = _settings != null ? _settings.IconScaleMultiplier : 1f;
                 RebuildUi();
             });
-            RowCycle(ref y, $"Text size  x{textScale:0.##}", () =>
+            RowCycle(ref y, $"Text size:  x{textScale:0.##}", () =>
             {
                 _settings?.CycleTextScale();
                 CotMarkerView.LabelScaleMultiplier = _settings != null ? _settings.TextScaleMultiplier : 1f;
                 RebuildUi();
             });
-            RowCycle(ref y, $"Move speed  x{spd:0.#}", () =>
+            RowCycle(ref y, $"Move speed:  x{spd:0.#}", () =>
             {
                 _settings?.CycleMoveSpeed();
                 _loco?.SetSpeedMultiplier(_settings != null ? _settings.MoveSpeedMultiplier : 1f);
                 RebuildUi();
             });
-            RowCycle(ref y, $"Backend fallback  {(fallback ? "ON" : "OFF")}", () =>
+            RowCycle(ref y, $"Backend fallback:  {(fallback ? "ON" : "OFF")}", () =>
             {
                 if (_config != null)
                 {
@@ -177,7 +184,7 @@ namespace TakXr.UI
                 }
                 RebuildUi();
             });
-            RowCycle(ref y, $"Snap turn  {(snap ? "ON" : "OFF")}", () =>
+            RowCycle(ref y, $"Snap turn:  {(snap ? "ON" : "OFF")}", () =>
             {
                 _settings?.ToggleSnapTurn();
                 _loco?.SetSnapTurnEnabled(_settings != null && _settings.SnapTurnEnabled);
@@ -187,15 +194,15 @@ namespace TakXr.UI
             var updates = AppUpdateChecker.Instance;
             var latest = updates != null ? updates.LatestLabel : "…";
             var updateState = updates != null ? updates.StatusMessage : "Checking for updates…";
-            RowLabel(ref y, "App  v" + Application.version + "   latest " + latest);
-            LeftLabel(updateState, new Vector3(-PanelW / 2f + 0.06f, y, -0.01f));
-            AddButton("CheckUpdate", new Vector3(0.16f, y, -0.01f), new Vector2(0.16f, 0.045f),
+            LeftLabel($"App v{Application.version}  (latest {latest}) · {updateState}",
+                new Vector3(-PanelW / 2f + 0.055f, y, -0.01f), 0.46f);
+            AddButton("CheckUpdate", new Vector3(0.15f, y, -0.01f), new Vector2(0.15f, 0.045f),
                 "Check", false, () =>
                 {
                     AppUpdateChecker.Instance?.CheckNow();
                     _flash?.Invoke("Checking GitHub…");
                 });
-            AddButton("InstallUpdate", new Vector3(0.34f, y, -0.01f), new Vector2(0.16f, 0.045f),
+            AddButton("InstallUpdate", new Vector3(0.33f, y, -0.01f), new Vector2(0.16f, 0.045f),
                 "Install", updates != null && updates.UpdateAvailable, () =>
                 {
                     if (AppUpdateChecker.Instance == null || !AppUpdateChecker.Instance.UpdateAvailable)
@@ -208,17 +215,16 @@ namespace TakXr.UI
                     AppUpdateChecker.Instance.BeginInstall();
                     _flash?.Invoke("Downloading update…");
                 });
-            y -= 0.065f;
 
-            float by = -PanelH / 2f + 0.12f;
-            AddButton("Origin", new Vector3(-0.32f, by, -0.01f), new Vector2(0.26f, 0.05f),
+            float by = -PanelH / 2f + 0.085f;
+            AddButton("Origin", new Vector3(-0.30f, by, -0.01f), new Vector2(0.25f, 0.050f),
                 "Origin here", false, () =>
                 {
                     _onOriginHere?.Invoke();
                     _flash?.Invoke("Origin set to viewer");
                     Hide();
                 });
-            AddButton("Flatten", new Vector3(0f, by, -0.01f), new Vector2(0.26f, 0.05f),
+            AddButton("Flatten", new Vector3(0f, by, -0.01f), new Vector2(0.25f, 0.050f),
                 $"Tilt {(_loco != null ? Mathf.RoundToInt(_loco.SavedPitchDeg) : 0)}°", false, () =>
                 {
                     float next = _loco != null ? _loco.CycleTiltPreset() : 0f;
@@ -228,7 +234,7 @@ namespace TakXr.UI
                         : $"Earth Tilt: {Mathf.RoundToInt(next)}° Upright View");
                     RebuildUi();
                 });
-            AddButton("Fit", new Vector3(0.32f, by, -0.01f), new Vector2(0.26f, 0.05f),
+            AddButton("Fit", new Vector3(0.30f, by, -0.01f), new Vector2(0.25f, 0.050f),
                 "Fit tracks", false, () =>
                 {
                     _onFitTracks?.Invoke();
@@ -237,27 +243,20 @@ namespace TakXr.UI
                 });
         }
 
-        void RowLabel(ref float y, string msg)
-        {
-            Text("L", _rowsRoot, new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
-                msg, 0.007f, new Color(0.88f, 0.94f, 1f, 0.95f),
-                TextAnchor.MiddleLeft, TextAlignment.Left);
-            y -= 0.07f;
-        }
-
         void RowCycle(ref float y, string msg, Action onClick)
         {
-            LeftLabel(msg, new Vector3(-PanelW / 2f + 0.06f, y, -0.01f));
-            AddButton("Cyc" + y, new Vector3(0.28f, y, -0.01f), new Vector2(0.22f, 0.045f),
+            LeftLabel(msg, new Vector3(-PanelW / 2f + 0.055f, y, -0.01f), 0.56f);
+            AddButton("Cyc" + y, new Vector3(0.29f, y, -0.01f), new Vector2(0.22f, 0.046f),
                 "Cycle", false, onClick);
-            y -= 0.065f;
+            y -= 0.068f;
         }
 
-        void LeftLabel(string msg, Vector3 pos)
+        void LeftLabel(string msg, Vector3 pos, float maxW = 0.54f)
         {
-            Text("Lbl", _rowsRoot, pos, msg, 0.0066f,
-                new Color(0.88f, 0.94f, 1f, 0.95f),
+            var tm = Text("Lbl", _rowsRoot, pos, msg, 0.0062f,
+                new Color(0.88f, 0.94f, 1f, 0.96f),
                 TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(tm, maxW, 0.045f);
         }
 
         // ---------------- typed callsign edit ----------------

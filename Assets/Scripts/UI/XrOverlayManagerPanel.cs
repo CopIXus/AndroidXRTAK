@@ -124,9 +124,10 @@ namespace TakXr.UI
             foreach (Transform child in _contentRoot) Destroy(child.gameObject);
             _hitTargets.Clear();
 
-            Text("Title", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, PanelH / 2f - 0.048f, -0.01f),
+            var titleTm = Text("Title", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, PanelH / 2f - 0.048f, -0.01f),
                 "ATAK OVERLAY MANAGER  ·  3D LAYERS & IMPORT",
-                0.0086f, new Color(0.88f, 0.98f, 0.94f, 1f), TextAnchor.MiddleLeft, TextAlignment.Left);
+                0.0072f, new Color(0.88f, 0.98f, 0.94f, 1f), TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(titleTm, PanelW - 0.22f, 0.044f);
 
             AddButton("Close", new Vector3(PanelW / 2f - 0.055f, PanelH / 2f - 0.048f, -0.01f),
                 new Vector2(0.068f, 0.048f), "X", false, Hide);
@@ -227,12 +228,14 @@ namespace TakXr.UI
                 Quad("Badge_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.065f, y, -0.004f),
                     new Vector2(0.024f, 0.038f), badgeCol, 3001);
 
-                Text("Name_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y + 0.009f, -0.01f),
-                    c.Callsign ?? c.uid, 0.0072f, hidden ? new Color(0.5f, 0.55f, 0.6f) : Color.white,
+                var nameTm = Text("Name_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y + 0.011f, -0.01f),
+                    c.Callsign ?? c.uid, 0.0062f, hidden ? new Color(0.5f, 0.55f, 0.6f) : Color.white,
                     TextAnchor.MiddleLeft, TextAlignment.Left);
-                Text("Kind_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y - 0.013f, -0.01f),
+                XrText.SetMaxBounds(nameTm, 0.52f, 0.030f);
+                var kindTm = Text("Kind_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y - 0.013f, -0.01f),
                     $"3D {kind}  ·  {c.type}  ·  {c.point?.lat:F4}, {c.point?.lon:F4}",
-                    0.0055f, new Color(0.65f, 0.82f, 0.94f, 0.90f), TextAnchor.MiddleLeft, TextAlignment.Left);
+                    0.0048f, new Color(0.65f, 0.82f, 0.94f, 0.90f), TextAnchor.MiddleLeft, TextAlignment.Left);
+                XrText.SetMaxBounds(kindTm, 0.52f, 0.026f);
 
                 var captured = c;
                 AddButton("Vis_" + i, new Vector3(0.18f, y, -0.01f), new Vector2(0.15f, 0.044f),

@@ -262,8 +262,8 @@ namespace TakXr.UI
                 _topLedRend.sharedMaterial = Cot3dModelFactory.GetLitMaterial(new Color(0.2f, 0.95f, 0.5f, 1f), 0.8f);
 
             _topStatusText = XrText.Make("TopTelemetry", _topStatusPill, new Vector3(-0.50f, 0f, -0.004f),
-                "TAKXR 3D  ·  Initializing…", 0.0046f, new Color(0.90f, 0.97f, 1f, 0.98f),
-                TextAnchor.MiddleLeft, TextAlignment.Left);
+                "TAKXR 3D  ·  Initializing…", 0.0038f, new Color(0.90f, 0.97f, 1f, 0.98f),
+                TextAnchor.MiddleLeft, TextAlignment.Left, maxWidthM: 0.44f, maxHeightM: 0.044f);
 
             // Quick Upright God's-Eye Wall Tilt button on top pill
             AddPillButton("top_tilt", new Vector3(0.03f, 0f, -0.002f), new Vector2(0.14f, 0.048f),

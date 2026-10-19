@@ -1,9 +1,5 @@
 apply plugin: 'com.android.library'
 
-dependencies {
-    implementation 'androidx.core:core:1.13.1'
-}
-
 android {
     namespace "us.copix.takxr.update"
     compileSdkVersion 34

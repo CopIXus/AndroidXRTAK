@@ -777,7 +777,7 @@ namespace TakXr.UI
                 string dir = Path.Combine(Application.persistentDataPath, "snapshots");
                 Directory.CreateDirectory(dir);
                 fullPath = Path.Combine(dir, fileName);
-                ScreenCapture.CaptureScreenshot(fullPath);
+                UnityEngine.ScreenCapture.CaptureScreenshot(fullPath);
             }
             catch (Exception ex)
             {

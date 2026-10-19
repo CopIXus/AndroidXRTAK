@@ -194,6 +194,8 @@ namespace TakXr.Core
                         return "Allow installs from TAKXR, then tap Install again";
                     if (result == "started")
                         return "Confirm the Android install prompt";
+                    if (result == "failed")
+                        return "Could not open installer";
                     return "Update file missing";
                 }
             }

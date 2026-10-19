@@ -74,6 +74,12 @@ namespace TakXr.UI
             _rowsRoot.SetParent(_root, false);
         }
 
+        public void Toggle(Transform cam = null)
+        {
+            if (IsVisible) Hide();
+            else Open(Tab.Packages, cam);
+        }
+
         public void Open(Tab tab, Transform cam)
         {
             _tab = tab;

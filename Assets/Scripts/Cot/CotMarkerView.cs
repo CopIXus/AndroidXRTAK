@@ -215,6 +215,8 @@ namespace TakXr.Cot
             UpdateEmergencyHalo();
         }
 
+        static GameObject ModelGo(Transform built) => built != null ? built.gameObject : null;
+
         void ReplaceModel(string key, System.Func<GameObject> builder)
         {
             if (_modelKey == key && _modelInstance != null) return;
@@ -251,7 +253,7 @@ namespace TakXr.Cot
             _headingDeg = hasCourse ? course : 0f;
             string hex = ColorUtility.ToHtmlStringRGB(color);
             string key = $"ball3d:{hex}:{(hasCourse ? "c" : "nc")}";
-            ReplaceModel(key, () => Cot3dModelFactory.BuildUnitBall(color, hasCourse ? 0f : float.NaN, key));
+            ReplaceModel(key, () => ModelGo(Cot3dModelFactory.BuildUnitBall(null, color, hasCourse ? 0f : float.NaN)));
         }
 
         void ApplyFallbackBall3D(NormalizedCot cot)
@@ -270,7 +272,7 @@ namespace TakXr.Cot
             _headingDeg = hasCourse ? course : 0f;
             string hex = ColorUtility.ToHtmlStringRGB(color);
             string key = $"ball3d:{hex}:{(hasCourse ? "c" : "nc")}";
-            ReplaceModel(key, () => Cot3dModelFactory.BuildUnitBall(color, hasCourse ? 0f : float.NaN, key));
+            ReplaceModel(key, () => ModelGo(Cot3dModelFactory.BuildUnitBall(null, color, hasCourse ? 0f : float.NaN)));
         }
 
         void ApplyAircraft3D(NormalizedCot cot, bool rotary)
@@ -283,9 +285,9 @@ namespace TakXr.Cot
             _headingDeg = course;
             string hex = ColorUtility.ToHtmlStringRGB(color);
             string key = (rotary ? "heli3d:" : "plane3d:") + hex;
-            ReplaceModel(key, () => rotary
-                ? Cot3dModelFactory.BuildRotaryHelicopter(color)
-                : Cot3dModelFactory.BuildFixedWingAirplane(color));
+            ReplaceModel(key, () => ModelGo(rotary
+                ? Cot3dModelFactory.BuildRotaryHelicopter(null, color, float.NaN)
+                : Cot3dModelFactory.BuildFixedWingAirplane(null, color, float.NaN)));
         }
 
         void ApplyVideoPod3D(NormalizedCot cot)
@@ -295,7 +297,7 @@ namespace TakXr.Cot
             _worldOriented3D = true;
             _headingDeg = float.IsNaN(az) ? 0f : az;
             string key = "videopod3d";
-            ReplaceModel(key, () => Cot3dModelFactory.BuildVideoPod(color));
+            ReplaceModel(key, () => ModelGo(Cot3dModelFactory.BuildVideoPod(null, float.NaN)));
         }
 
         void ApplyObserver3D(NormalizedCot cot)
@@ -313,7 +315,7 @@ namespace TakXr.Cot
             _headingDeg = hasAz ? az : 0f;
             string hex = ColorUtility.ToHtmlStringRGB(color);
             string key = $"observer3d:{hex}:{(hasAz ? "fov" : "nofov")}";
-            ReplaceModel(key, () => Cot3dModelFactory.BuildObserverPawn(color, hasAz ? 0f : float.NaN));
+            ReplaceModel(key, () => ModelGo(Cot3dModelFactory.BuildObserverPawn(null, color, hasAz ? 0f : float.NaN)));
         }
 
         void ApplyDcfs3D()
@@ -322,7 +324,7 @@ namespace TakXr.Cot
             _headingDeg = 0f;
             var orange = new Color(1f, 0.47f, 0f, 1f);
             string key = "dcfs3d";
-            ReplaceModel(key, () => Cot3dModelFactory.BuildExtrudedIconObject(GetDcfsIcon(), orange, key));
+            ReplaceModel(key, () => ModelGo(Cot3dModelFactory.BuildExtrudedIconObject(null, GetDcfsIcon(), orange)));
         }
 
         bool TryApplyLocalIconset3D(NormalizedCot cot)
@@ -334,7 +336,7 @@ namespace TakXr.Cot
             string key = "iconset3d:" + id + ":" + ColorUtility.ToHtmlStringRGB(color);
             _worldOriented3D = false;
             _headingDeg = 0f;
-            ReplaceModel(key, () => Cot3dModelFactory.BuildExtrudedIconObject(tex, color, "mesh:" + id));
+            ReplaceModel(key, () => ModelGo(Cot3dModelFactory.BuildExtrudedIconObject(null, tex, color)));
             return true;
         }
 
@@ -352,7 +354,7 @@ namespace TakXr.Cot
             // Show a 3D ball immediately until the remote icon texture downloads.
             string fallbackKey = "ball3d:" + ColorUtility.ToHtmlStringRGB(color) + ":nc";
             _worldOriented3D = false;
-            ReplaceModel(fallbackKey, () => Cot3dModelFactory.BuildUnitBall(color, float.NaN, fallbackKey));
+            ReplaceModel(fallbackKey, () => ModelGo(Cot3dModelFactory.BuildUnitBall(null, color, float.NaN)));
             _iconLoad = StartCoroutine(LoadIcon3D(url, color, remoteKey));
         }
 
@@ -368,7 +370,7 @@ namespace TakXr.Cot
             if (_runtimeTex != null) Destroy(_runtimeTex);
             _runtimeTex = tex;
             _worldOriented3D = false;
-            ReplaceModel(remoteKey, () => Cot3dModelFactory.BuildExtrudedIconObject(tex, color, remoteKey));
+            ReplaceModel(remoteKey, () => ModelGo(Cot3dModelFactory.BuildExtrudedIconObject(null, tex, color)));
         }
 
         void UpdateEmergencyHalo()

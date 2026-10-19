@@ -118,6 +118,16 @@ namespace TakXr.Xr
 
         public void Flatten(Transform camera) => SetWorldPitch(camera, 0f);
 
+        /// <summary>Set absolute pitch about an arbitrary world point (level horizon = 0).</summary>
+        public void SetPitchAboutPoint(Vector3 pivot, float pitchDeg)
+        {
+            float target = Mathf.Clamp(pitchDeg, MinPitchDeg, MaxPitchDeg);
+            float applied = target - WorldPitchDeg;
+            if (Mathf.Abs(applied) < 1e-4f) return;
+            WorldPitchDeg = target;
+            RotateAboutAxis(pivot, Vector3.right, applied * Mathf.Deg2Rad);
+        }
+
         static Vector3 PitchAxis(Transform camera)
         {
             var right = camera.right;

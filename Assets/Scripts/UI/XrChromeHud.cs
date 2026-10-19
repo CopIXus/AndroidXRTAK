@@ -15,11 +15,15 @@ namespace TakXr.UI
     /// Modern Stitch-inspired spatial XR HUD for Android XR TAK:
     /// - Curved Bottom Spatial Dock with:
     ///   1. Left Wing: Interactive 3D World Globe (<see cref="XrMiniWorldGlobe"/>) showing live 3D CoT blips
-    ///   2. Center Bar: 8 ergonomic Quick-Action buttons (Point, Draw/Rte, 3D Overlays, GeoChat,
-    ///      SPI Laser, Bloodhound, Tabletop 3D, All Tools)
+    ///   2. Center Bar: 8 ergonomic Quick-Action buttons (Drop Pt, Draw/Rte, Overlays, GeoChat,
+    ///      SPI Laser, Nav 3D, Tilt View, All Tools)
     ///   3. Right Wing: 3D North Compass Rose &amp; live HDG / Lat-Lon-Alt telemetry
-    /// - Top Tactical Status Pill: Callsign/Team badge, TAK TLS status, 3D track count, 911/Medevac button
-    /// - Full ATAK &amp; VR-TAK Tools Drawer: all 36 tools enabled &amp; wired (zero stubs).
+    /// - Integrated Expandable Tray above the Bottom Dock:
+    ///   Clicking any tool/menu button expands the bottom dock upward into a unified tray
+    ///   (housing Overlays, GeoChat, Channels, Maps, Servers, Settings, Info, Video, or the
+    ///   All Tools grid) with a 1-tap "▼ Collapse Menu" bar to fold everything back down cleanly.
+    /// - Top Tactical Status Pill: Callsign/Team badge, TAK TLS status, 3D track count,
+    ///   Immerse 360°, Wall Tilt, 3D Demo, and 911/Medevac buttons.
     /// </summary>
     public class XrChromeHud : MonoBehaviour
     {
@@ -68,6 +72,10 @@ namespace TakXr.UI
         int _drawCycle;
 
         Transform _dockRoot;
+        Transform _trayAnchor;
+        Transform _collapseStrip;
+        TextMesh _collapseStripLabel;
+        TextMesh _dockTiltLabel;
         Transform _topStatusPill;
         TextMesh _topStatusText;
         Renderer _topLedRend;
@@ -184,7 +192,13 @@ namespace TakXr.UI
             BuildSpatialDock();
             BuildStatus();
             _statusHideAt = Time.unscaledTime + 5f;
-            FlashStatus("TAKXR 3D Ready · Bottom Dock + 3D World Globe + Full ATAK Suite");
+            FlashStatus("TAKXR 3D Ready · Tap 'Tilt View' to stand up & look straight ahead at the Earth");
+        }
+
+        void OnDestroy()
+        {
+            if (XrUiFacing.DockTrayAnchor == _trayAnchor)
+                XrUiFacing.DockTrayAnchor = null;
         }
 
         void BuildCompass()
@@ -202,7 +216,7 @@ namespace TakXr.UI
                 new Color(1f, 1f, 1f, 0.95f), 0.003f);
             CreateLine("LookTick", _compassRoot,
                 new Vector3(-0.006f, 0.002f, 0.048f),
-                new Vector3(0.006f, 0.002f, 0.048f),
+                new Vector3(0f, 0.002f, 0.048f),
                 new Color(1f, 1f, 1f, 0.9f), 0.0025f);
 
             // North group rotates so N sits toward geographic north.
@@ -231,9 +245,9 @@ namespace TakXr.UI
             _topStatusPill = new GameObject("TopStatusPill").transform;
             _topStatusPill.SetParent(transform, false);
 
-            Quad("PillBg", _topStatusPill, new Vector3(0f, 0f, 0.006f), new Vector2(1.06f, 0.068f),
+            Quad("PillBg", _topStatusPill, new Vector3(0f, 0f, 0.006f), new Vector2(1.16f, 0.068f),
                 new Color(0.03f, 0.07f, 0.13f, 0.90f), 2994);
-            Quad("PillTrim", _topStatusPill, new Vector3(0f, -0.032f, 0.004f), new Vector2(1.06f, 0.004f),
+            Quad("PillTrim", _topStatusPill, new Vector3(0f, -0.032f, 0.004f), new Vector2(1.16f, 0.004f),
                 new Color(0.15f, 0.82f, 1f, 0.85f), 2996);
 
             // Status LED sphere
@@ -241,36 +255,41 @@ namespace TakXr.UI
             led.name = "TakLed";
             Destroy(led.GetComponent<Collider>());
             led.transform.SetParent(_topStatusPill, false);
-            led.transform.localPosition = new Vector3(-0.48f, 0f, -0.004f);
+            led.transform.localPosition = new Vector3(-0.53f, 0f, -0.004f);
             led.transform.localScale = Vector3.one * 0.020f;
             _topLedRend = led.GetComponent<Renderer>();
             if (_topLedRend != null)
                 _topLedRend.sharedMaterial = Cot3dModelFactory.GetLitMaterial(new Color(0.2f, 0.95f, 0.5f, 1f), 0.8f);
 
-            _topStatusText = XrText.Make("TopTelemetry", _topStatusPill, new Vector3(-0.45f, 0f, -0.004f),
-                "TAKXR 3D  ·  Initializing…", 0.0048f, new Color(0.90f, 0.97f, 1f, 0.98f),
+            _topStatusText = XrText.Make("TopTelemetry", _topStatusPill, new Vector3(-0.50f, 0f, -0.004f),
+                "TAKXR 3D  ·  Initializing…", 0.0046f, new Color(0.90f, 0.97f, 1f, 0.98f),
                 TextAnchor.MiddleLeft, TextAlignment.Left);
 
+            // Quick Upright God's-Eye Wall Tilt button on top pill
+            AddPillButton("top_tilt", new Vector3(0.03f, 0f, -0.002f), new Vector2(0.14f, 0.048f),
+                "Wall Tilt", new Color(0.16f, 0.36f, 0.62f, 0.96f), CycleGodsEyeTilt);
+
             // Quick 1:1 360° Ground Immersion + X-Ray Occlusion button on top pill
-            AddPillButton("top_immerse", new Vector3(0.11f, 0f, -0.002f), new Vector2(0.16f, 0.048f),
+            AddPillButton("top_immerse", new Vector3(0.19f, 0f, -0.002f), new Vector2(0.15f, 0.048f),
                 "Immerse 360°", new Color(0.08f, 0.48f, 0.36f, 0.96f), () =>
                 {
                     tacticalSuite?.ToggleImmersiveGroundView();
                 });
 
             // Quick 3D Demo Spawn button on top pill
-            AddPillButton("top_demo3d", new Vector3(0.28f, 0f, -0.002f), new Vector2(0.14f, 0.048f),
+            AddPillButton("top_demo3d", new Vector3(0.35f, 0f, -0.002f), new Vector2(0.13f, 0.048f),
                 "3D Demo", new Color(0.12f, 0.42f, 0.58f, 0.95f), () =>
                 {
                     overlayManagerPanel?.ToggleDemoFormation();
                 });
 
             // Quick 911 / CASEVAC button on top pill
-            AddPillButton("top_911", new Vector3(0.44f, 0f, -0.002f), new Vector2(0.15f, 0.048f),
+            AddPillButton("top_911", new Vector3(0.495f, 0f, -0.002f), new Vector2(0.14f, 0.048f),
                 "911 / MED", new Color(0.68f, 0.14f, 0.16f, 0.96f), () =>
                 {
-                    HideSidePanels();
-                    emergencyPanel?.Toggle(cameraTransform, casevac: false);
+                    bool wasOpen = emergencyPanel != null && emergencyPanel.IsVisible;
+                    CollapseAllMenus();
+                    if (!wasOpen) emergencyPanel?.ShowEmergency(cameraTransform);
                 });
         }
 
@@ -280,7 +299,7 @@ namespace TakXr.UI
             root.SetParent(_topStatusPill, false);
             root.localPosition = localPos;
             Quad("Bg", root, Vector3.zero, size, bg, 2998);
-            XrText.Make("Lbl", root, new Vector3(0f, 0f, -0.004f), label, 0.0046f, Color.white);
+            XrText.Make("Lbl", root, new Vector3(0f, 0f, -0.004f), label, 0.0044f, Color.white);
             var col = root.gameObject.AddComponent<BoxCollider>();
             col.size = new Vector3(size.x + 0.01f, size.y + 0.01f, 0.05f);
             col.isTrigger = true;
@@ -292,6 +311,12 @@ namespace TakXr.UI
             _dockRoot = new GameObject("SpatialQuickDock").transform;
             _dockRoot.SetParent(transform, false);
 
+            // Unified Tray Anchor directly above the bottom dock so all sub-panels
+            // expand upward from the dock as one cohesive drawer.
+            _trayAnchor = new GameObject("DockTrayAnchor").transform;
+            _trayAnchor.SetParent(transform, false);
+            XrUiFacing.DockTrayAnchor = _trayAnchor;
+
             // Sleek dark glassmorphic dock plate with cyan top border
             const float dockW = 1.18f;
             const float dockH = 0.155f;
@@ -299,6 +324,31 @@ namespace TakXr.UI
                 new Color(0.03f, 0.07f, 0.13f, 0.92f), 2994);
             Quad("DockTopAccent", _dockRoot, new Vector3(0.06f, dockH * 0.5f - 0.004f, 0.005f),
                 new Vector2(dockW, 0.006f), new Color(0.16f, 0.82f, 1f, 0.95f), 2996);
+
+            // Collapse Bar perched on top edge of dock whenever any panel/drawer is expanded
+            _collapseStrip = new GameObject("DockCollapseStrip").transform;
+            _collapseStrip.SetParent(_dockRoot, false);
+            _collapseStrip.localPosition = new Vector3(0.06f, dockH * 0.5f + 0.034f, -0.002f);
+            Quad("CollapseBg", _collapseStrip, Vector3.zero, new Vector2(0.56f, 0.048f),
+                new Color(0.10f, 0.34f, 0.54f, 0.97f), 3004);
+            Quad("CollapseAccent", _collapseStrip, new Vector3(0f, 0.022f, -0.001f), new Vector2(0.56f, 0.004f),
+                new Color(0.25f, 0.88f, 1f, 0.98f), 3006);
+            _collapseStripLabel = XrText.Make("CollapseLbl", _collapseStrip, new Vector3(0f, 0f, -0.005f),
+                "▼ COLLAPSE MENU", 0.0042f, Color.white);
+            var collapseCol = _collapseStrip.gameObject.AddComponent<BoxCollider>();
+            collapseCol.size = new Vector3(0.58f, 0.056f, 0.06f);
+            collapseCol.isTrigger = true;
+            _buttons.Add(new ToolBtn
+            {
+                Root = _collapseStrip,
+                Id = "dock_collapse",
+                OnClick = () =>
+                {
+                    CollapseAllMenus(cancelActiveTools: true);
+                    FlashStatus("Menu collapsed");
+                },
+            });
+            _collapseStrip.gameObject.SetActive(false);
 
             // Left Wing of Dock: Interactive 3D World Globe showing live CoT locations
             var globeHost = new GameObject("GlobeWidgetHost").transform;
@@ -320,22 +370,46 @@ namespace TakXr.UI
             // 8 Ergonomic Quick-Action Buttons across the Spatial Dock
             var quickItems = new (string id, string icon, string label, Action act)[]
             {
-                ("q_point", "pointadd", "Drop Pt", () => drawTool?.ToggleMode(XrDrawTool.Mode.Point)),
-                ("q_draw", "draw", "Draw/Rte", CycleDrawingTool),
+                ("q_point", "pointadd", "Drop Pt", () =>
+                {
+                    CollapseAllMenus();
+                    drawTool?.ToggleMode(XrDrawTool.Mode.Point);
+                }),
+                ("q_draw", "draw", "Draw/Rte", () =>
+                {
+                    CollapseAllMenus();
+                    CycleDrawingTool();
+                }),
                 ("q_overlays", "layers", "Overlays", () =>
                 {
-                    HideSidePanels();
-                    overlayManagerPanel?.Toggle(cameraTransform);
+                    bool wasOpen = overlayManagerPanel != null && overlayManagerPanel.IsVisible;
+                    CollapseAllMenus();
+                    if (!wasOpen) overlayManagerPanel?.Show(cameraTransform);
                 }),
                 ("q_chat", "chat", "GeoChat", () =>
                 {
-                    HideSidePanels();
-                    chatContactsPanel?.Toggle(cameraTransform, openChat: true);
+                    bool wasOpen = chatContactsPanel != null && chatContactsPanel.IsVisible;
+                    CollapseAllMenus();
+                    if (!wasOpen) chatContactsPanel?.ShowChat(cameraTransform);
                 }),
-                ("q_spi", "pointer", "SPI Laser", () => tacticalSuite?.ToggleDigitalPointer()),
-                ("q_nav", "quicknav", "Nav 3D", () => tacticalSuite?.ToggleQuickNav()),
-                ("q_table", "rubbersheet", "Tabletop", () => tacticalSuite?.ToggleTabletopMode()),
-                ("menu", "hamburger", "All Tools", () => SetMenu(!_menuOpen)),
+                ("q_spi", "pointer", "SPI Laser", () =>
+                {
+                    CollapseAllMenus();
+                    tacticalSuite?.ToggleDigitalPointer();
+                }),
+                ("q_nav", "quicknav", "Nav 3D", () =>
+                {
+                    CollapseAllMenus();
+                    tacticalSuite?.ToggleQuickNav();
+                }),
+                ("q_tilt", "orientation", "Tilt View", CycleGodsEyeTilt),
+                ("menu", "hamburger", "All Tools", () =>
+                {
+                    if (_menuOpen || IsAnyTrayPanelOpen())
+                        CollapseAllMenus();
+                    else
+                        SetMenu(true);
+                }),
             };
 
             const float step = 0.140f;
@@ -349,13 +423,43 @@ namespace TakXr.UI
 
             foreach (var b in _buttons)
             {
-                if (b.Id != "menu" || b.Root == null) continue;
-                var icon = b.Root.Find("Icon");
-                if (icon != null) _menuBtnIcon = icon;
-                break;
+                if (b.Root == null) continue;
+                if (b.Id == "menu")
+                {
+                    var icon = b.Root.Find("Icon");
+                    if (icon != null) _menuBtnIcon = icon;
+                }
+                else if (b.Id == "q_tilt")
+                {
+                    var lbl = b.Root.Find("Lbl");
+                    if (lbl != null) _dockTiltLabel = lbl.GetComponent<TextMesh>();
+                }
             }
 
             BuildMenu();
+        }
+
+        void CycleGodsEyeTilt()
+        {
+            if (locomotion == null) return;
+            if (tacticalSuite != null && tacticalSuite.IsTabletopActive)
+                tacticalSuite.ToggleTabletopMode();
+
+            float deg = locomotion.CycleTiltPreset();
+            string modeName = deg >= 50f
+                ? "WALL VIEW (62° Upright — Look Straight Ahead)"
+                : deg >= 20f
+                    ? "ANGLED DESK VIEW (38° Tilted Command Table)"
+                    : "FLAT FLOOR VIEW (0° Top-Down)";
+            FlashStatus($"Earth Tilt: {modeName}\n(Hold B/Y + Thumbstick Up/Down for smooth custom tilt)");
+            UpdateTiltButtonLabel();
+        }
+
+        void UpdateTiltButtonLabel()
+        {
+            if (_dockTiltLabel == null || world == null) return;
+            int p = Mathf.RoundToInt(world.WorldPitchDeg);
+            _dockTiltLabel.text = p <= 2 ? "Tilt: 0°" : $"Tilt: {p}°";
         }
 
         void AddDockButton(string id, string iconName, string label, Vector3 localPos, Action onClick)
@@ -385,31 +489,31 @@ namespace TakXr.UI
             _menuRoot = new GameObject("Menu").transform;
             _menuRoot.SetParent(transform, false);
 
-            Quad("PanelBg", _menuRoot, new Vector3(0f, -0.48f, 0.008f), new Vector2(1.30f, 1.08f),
-                new Color(0.03f, 0.07f, 0.13f, 0.95f), 2990);
-            Quad("PanelAccent", _menuRoot, new Vector3(0f, 0.055f, 0.005f), new Vector2(1.30f, 0.012f),
+            // Centered on local (0,0,0) so it sits cleanly inside _trayAnchor above the bottom dock.
+            Quad("PanelBg", _menuRoot, new Vector3(0f, 0f, 0.008f), new Vector2(1.24f, 0.86f),
+                new Color(0.03f, 0.07f, 0.13f, 0.96f), 2990);
+            Quad("PanelAccent", _menuRoot, new Vector3(0f, 0.424f, 0.005f), new Vector2(1.24f, 0.010f),
                 new Color(0.15f, 0.82f, 1f, 0.96f), 2995);
 
-            var header = Text("Header", _menuRoot, new Vector3(-0.58f, -0.02f, -0.002f),
-                "ATAK XR TACTICAL SUITE (ALL 36 TOOLS ACTIVE)", 0.0046f, new Color(0.90f, 0.98f, 1f, 0.98f));
+            var header = Text("Header", _menuRoot, new Vector3(-0.56f, 0.37f, -0.002f),
+                "ATAK XR TACTICAL SUITE (ALL 36 TOOLS)", 0.0044f, new Color(0.90f, 0.98f, 1f, 0.98f));
             header.anchor = TextAnchor.MiddleLeft;
             header.alignment = TextAlignment.Left;
 
-            AddHeaderIconBtn("hdr_settings", "settings", new Vector3(0.42f, -0.02f, -0.002f), () =>
+            AddHeaderIconBtn("hdr_settings", "settings", new Vector3(0.42f, 0.37f, -0.002f), () =>
             {
-                HideSidePanels();
+                CollapseAllMenus();
                 settingsPanel?.Open(cameraTransform);
-                SetMenu(false);
             });
-            AddHeaderIconBtn("hdr_close", "close", new Vector3(0.56f, -0.02f, -0.002f), () => SetMenu(false));
+            AddHeaderIconBtn("hdr_close", "close", new Vector3(0.55f, 0.37f, -0.002f), () => CollapseAllMenus());
 
-            _menuPageLabel = Text("Page", _menuRoot, new Vector3(0f, -1.00f, -0.002f),
-                "", 0.0038f, new Color(0.80f, 0.92f, 1f, 0.95f));
-            AddHeaderIconBtn("page_prev", "pageup", new Vector3(-0.56f, -1.00f, -0.002f), () =>
+            _menuPageLabel = Text("Page", _menuRoot, new Vector3(0f, -0.37f, -0.002f),
+                "", 0.0036f, new Color(0.80f, 0.92f, 1f, 0.95f));
+            AddHeaderIconBtn("page_prev", "pageup", new Vector3(-0.54f, -0.37f, -0.002f), () =>
             {
                 if (_menuPage > 0) { _menuPage--; RebuildMenuPage(); }
             });
-            AddHeaderIconBtn("page_next", "pagedown", new Vector3(0.56f, -1.00f, -0.002f), () =>
+            AddHeaderIconBtn("page_next", "pagedown", new Vector3(0.54f, -0.37f, -0.002f), () =>
             {
                 int maxPage = Mathf.Max(0, (_toolCatalog.Count - 1) / MenuPageSize);
                 if (_menuPage < maxPage) { _menuPage++; RebuildMenuPage(); }
@@ -463,10 +567,19 @@ namespace TakXr.UI
             });
             Tool("pointer", "pointer", "Digital Pointer", () =>
             {
+                HideSidePanels();
                 tacticalSuite?.ToggleDigitalPointer();
             });
-            Tool("drawing", "draw", "Drawing Tools", CycleDrawingTool);
-            Tool("elevation", "elevation", "Elevation", () => elevationTool?.Toggle());
+            Tool("drawing", "draw", "Drawing Tools", () =>
+            {
+                HideSidePanels();
+                CycleDrawingTool();
+            });
+            Tool("elevation", "elevation", "Elevation", () =>
+            {
+                HideSidePanels();
+                elevationTool?.Toggle();
+            });
             Tool("firstperson", "firstperson", "First Person", ToggleFollowSelected);
             Tool("gallery", "gallery", "3D Overlays", () =>
             {
@@ -475,6 +588,7 @@ namespace TakXr.UI
             });
             Tool("geofence", "geofence", "Geofence 3D", () =>
             {
+                HideSidePanels();
                 tacticalSuite?.ToggleGeofenceTool();
             });
             Tool("goto", "goto", "GoTo", () =>
@@ -488,20 +602,25 @@ namespace TakXr.UI
             });
             Tool("lasso", "lasso", "Lasso Select", () =>
             {
+                HideSidePanels();
                 tacticalSuite?.ToggleLassoTool();
             });
             Tool("linkeud", "plugins", "Link EUD", () =>
             {
                 tacticalSuite?.ShowLinkEudStatus();
             });
-            Tool("orientation", "orientation", "Orientation",
-                () => { locomotion?.OrientNorth(); FlashStatus("Orientation: north-up"); });
+            Tool("orientation", "orientation", "Tilt / North", () =>
+            {
+                locomotion?.OrientNorth();
+                CycleGodsEyeTilt();
+            });
             Tool("plugins", "plugins", "Plugins", () =>
             {
                 tacticalSuite?.ShowPluginsStatus();
             });
             Tool("quicknav", "quicknav", "Quick Nav", () =>
             {
+                HideSidePanels();
                 tacticalSuite?.ToggleQuickNav();
             });
             Tool("quickpic", "quickpic", "Quick Pic", () =>
@@ -512,22 +631,34 @@ namespace TakXr.UI
             {
                 tacticalSuite?.ShowRadioStatus();
             });
-            Tool("range", "range", "Range Tools", () => rangeTool?.Toggle());
+            Tool("range", "range", "Range Tools", () =>
+            {
+                HideSidePanels();
+                rangeTool?.Toggle();
+            });
             Tool("resection", "resection", "Resection", () =>
             {
+                HideSidePanels();
                 tacticalSuite?.ToggleResectionTool();
             });
-            Tool("routes", "route", "Routes",
-                () => drawTool?.ToggleMode(XrDrawTool.Mode.Route));
+            Tool("routes", "route", "Routes", () =>
+            {
+                HideSidePanels();
+                drawTool?.ToggleMode(XrDrawTool.Mode.Route);
+            });
             Tool("maps", "map", "Maps", () =>
             {
                 HideSidePanels();
                 basemapPanel?.Open(cameraTransform);
             });
-            Tool("pointdrop", "pointadd", "Point Drop",
-                () => drawTool?.ToggleMode(XrDrawTool.Mode.Point));
+            Tool("pointdrop", "pointadd", "Point Drop", () =>
+            {
+                HideSidePanels();
+                drawTool?.ToggleMode(XrDrawTool.Mode.Point);
+            });
             Tool("rubbersheet", "rubbersheet", "Tabletop 3D", () =>
             {
+                HideSidePanels();
                 tacticalSuite?.ToggleTabletopMode();
             });
             Tool("tracks", "tracks", "Track History", () => trackHistory?.Toggle());
@@ -555,11 +686,7 @@ namespace TakXr.UI
             });
             Tool("closeall", "close", "Close Tools", () =>
             {
-                drawTool?.Cancel();
-                rangeTool?.Cancel();
-                tacticalSuite?.CancelActiveTool();
-                HideSidePanels();
-                SetMenu(false);
+                CollapseAllMenus(cancelActiveTools: true);
                 FlashStatus("All panels & tools closed");
             });
             Tool("diag", "plugins", "Diagnostics", () =>
@@ -627,6 +754,60 @@ namespace TakXr.UI
             }
         }
 
+        public bool IsAnyTrayPanelOpen()
+        {
+            if (_menuOpen) return true;
+            if (layersPanel != null && layersPanel.IsVisible) return true;
+            if (basemapPanel != null && basemapPanel.IsVisible) return true;
+            if (serverPanel != null && serverPanel.IsVisible) return true;
+            if (settingsPanel != null && settingsPanel.IsVisible) return true;
+            if (goToPanel != null && goToPanel.IsVisible) return true;
+            if (videoBrowser != null && videoBrowser.IsVisible) return true;
+            if (chatContactsPanel != null && chatContactsPanel.IsVisible) return true;
+            if (emergencyPanel != null && emergencyPanel.IsVisible) return true;
+            if (overlayManagerPanel != null && overlayManagerPanel.IsVisible) return true;
+            if (infoPanel != null && infoPanel.IsVisible) return true;
+            if (videoPanel != null && videoPanel.IsVisible) return true;
+            if (drawTool != null && drawTool.ActiveMode != XrDrawTool.Mode.None) return true;
+            if (tacticalSuite != null && tacticalSuite.ActiveMode != XrTacticalToolsSuite.ToolMode.None) return true;
+            if (rangeTool != null && XrRangeMeasureTool.IsArmed) return true;
+            if (elevationTool != null && XrElevationTool.IsArmed) return true;
+            return false;
+        }
+
+        string ActiveTrayTitle()
+        {
+            if (_menuOpen) return "▼ COLLAPSE ALL TOOLS";
+            if (overlayManagerPanel != null && overlayManagerPanel.IsVisible) return "▼ COLLAPSE OVERLAYS";
+            if (chatContactsPanel != null && chatContactsPanel.IsVisible) return "▼ COLLAPSE GEOCHAT / CONTACTS";
+            if (emergencyPanel != null && emergencyPanel.IsVisible) return "▼ COLLAPSE 911 / CASEVAC";
+            if (layersPanel != null && layersPanel.IsVisible) return "▼ COLLAPSE CHANNELS / PACKAGES";
+            if (basemapPanel != null && basemapPanel.IsVisible) return "▼ COLLAPSE MAPS";
+            if (serverPanel != null && serverPanel.IsVisible) return "▼ COLLAPSE SERVERS";
+            if (settingsPanel != null && settingsPanel.IsVisible) return "▼ COLLAPSE SETTINGS";
+            if (goToPanel != null && goToPanel.IsVisible) return "▼ COLLAPSE GOTO";
+            if (videoBrowser != null && videoBrowser.IsVisible) return "▼ COLLAPSE VIDEO LIST";
+            if (videoPanel != null && videoPanel.IsVisible) return "▼ COLLAPSE VIDEO PLAYER";
+            if (infoPanel != null && infoPanel.IsVisible) return "▼ COLLAPSE DETAILS";
+            if (drawTool != null && drawTool.ActiveMode != XrDrawTool.Mode.None) return "▼ FINISH / CLOSE DRAW TOOL";
+            if (tacticalSuite != null && tacticalSuite.ActiveMode != XrTacticalToolsSuite.ToolMode.None) return "▼ CLOSE ACTIVE TOOL";
+            return "▼ COLLAPSE MENU";
+        }
+
+        public void CollapseAllMenus(bool cancelActiveTools = false)
+        {
+            SetMenu(false);
+            HideSidePanels();
+            if (cancelActiveTools)
+            {
+                drawTool?.Cancel();
+                rangeTool?.Cancel();
+                tacticalSuite?.CancelActiveTool();
+                if (elevationTool != null && XrElevationTool.IsArmed)
+                    elevationTool.Toggle();
+            }
+        }
+
         public void HideSidePanels()
         {
             layersPanel?.Hide();
@@ -638,6 +819,9 @@ namespace TakXr.UI
             chatContactsPanel?.Hide();
             emergencyPanel?.Hide();
             overlayManagerPanel?.Hide();
+            infoPanel?.Hide();
+            videoPanel?.Hide();
+            radialMenu?.Hide();
         }
 
         void CycleBrightness()
@@ -670,9 +854,9 @@ namespace TakXr.UI
             var root = new GameObject("Hdr_" + id).transform;
             root.SetParent(_menuRoot, false);
             root.localPosition = localPos;
-            MakeIconQuad(root, iconName, 0.055f, new Vector3(0f, 0f, -0.002f));
+            MakeIconQuad(root, iconName, 0.052f, new Vector3(0f, 0f, -0.002f));
             var col = root.gameObject.AddComponent<BoxCollider>();
-            col.size = new Vector3(0.09f, 0.09f, 0.08f);
+            col.size = new Vector3(0.085f, 0.085f, 0.08f);
             col.isTrigger = true;
             _buttons.Add(new ToolBtn { Root = root, OnClick = onClick, Id = id });
         }
@@ -726,16 +910,9 @@ namespace TakXr.UI
 
         void ClearAllTools()
         {
-            drawTool?.Cancel();
-            rangeTool?.Cancel();
-            tacticalSuite?.CancelActiveTool();
+            CollapseAllMenus(cancelActiveTools: true);
             tacticalSuite?.StopQuickNav();
             tacticalSuite?.ClearAllGeofences();
-            if (elevationTool != null && XrElevationTool.IsArmed) elevationTool.Toggle();
-            HideSidePanels();
-            infoPanel?.Hide();
-            videoPanel?.Hide();
-            radialMenu?.Hide();
             radialMenu?.ClearRangeBearing();
             trackHistory?.Clear();
             if (feed != null)
@@ -768,18 +945,33 @@ namespace TakXr.UI
 
         void SetMenu(bool open)
         {
+            if (open)
+                HideSidePanels();
             _menuOpen = open;
             if (_menuRoot != null) _menuRoot.gameObject.SetActive(open);
+            UpdateMenuButtonVisual();
+        }
+
+        void UpdateMenuButtonVisual()
+        {
+            bool anyOpen = IsAnyTrayPanelOpen();
             if (_menuBtnIcon != null)
             {
                 var r = _menuBtnIcon.GetComponent<Renderer>();
                 if (r != null && r.sharedMaterial != null)
                 {
-                    var tex = AtakToolbarIcons.Get(open ? "menuopen" : "hamburger");
+                    var tex = AtakToolbarIcons.Get(anyOpen ? "menuopen" : "hamburger");
                     r.sharedMaterial.mainTexture = tex;
                     if (r.sharedMaterial.HasProperty("_BaseMap"))
                         r.sharedMaterial.SetTexture("_BaseMap", tex);
                 }
+            }
+            if (_collapseStrip != null)
+            {
+                if (_collapseStrip.gameObject.activeSelf != anyOpen)
+                    _collapseStrip.gameObject.SetActive(anyOpen);
+                if (anyOpen && _collapseStripLabel != null)
+                    _collapseStripLabel.text = ActiveTrayTitle();
             }
         }
 
@@ -798,13 +990,13 @@ namespace TakXr.UI
             }
         }
 
-        // Tools grid: 4 columns × 4 rows per page.
+        // Tools grid: 4 columns × 4 rows per page, sized to sit cleanly inside the dock tray.
         const int MenuCols = 4;
         const int MenuRows = 4;
         const int MenuPageSize = MenuCols * MenuRows;
-        const float TileW = 0.30f;
-        const float TileH = 0.20f;
-        const float TileGap = 0.01f;
+        const float TileW = 0.28f;
+        const float TileH = 0.145f;
+        const float TileGap = 0.010f;
 
         void AddToolTile(string id, string iconName, string label, int index, Action onClick,
             bool enabled = true)
@@ -816,14 +1008,14 @@ namespace TakXr.UI
             float originX = -1.5f * (TileW + TileGap);
             root.localPosition = new Vector3(
                 originX + cIdx * (TileW + TileGap),
-                -0.16f - rIdx * (TileH + TileGap),
+                0.23f - rIdx * (TileH + TileGap),
                 0f);
 
-            OpaqueQuad("Bg", root, new Vector3(0f, 0f, 0.004f), new Vector2(TileW - 0.008f, TileH - 0.008f),
+            OpaqueQuad("Bg", root, new Vector3(0f, 0f, 0.004f), new Vector2(TileW - 0.008f, TileH - 0.006f),
                 new Color(0.08f, 0.14f, 0.22f, 1f), 3000);
 
             float alpha = enabled ? 1f : 0.4f;
-            MakeIconQuad(root, iconName, 0.078f, new Vector3(0f, 0.028f, -0.004f), alpha);
+            MakeIconQuad(root, iconName, 0.062f, new Vector3(0f, 0.018f, -0.004f), alpha);
             string display = label.Length > 14 ? label.Replace(" ", "\n") : label;
             if (label == "Digital Pointer" || label == "Radio Controls" || label == "Track History"
                 || label == "Tabletop 3D" || label == "Drawing Tools" || label == "Data Packages"
@@ -831,8 +1023,8 @@ namespace TakXr.UI
                 || label == "Point Drop" || label == "Close Tools" || label == "Import KML/CoT"
                 || label == "Geofence 3D" || label == "3D Overlays")
                 display = label.Replace(" ", "\n");
-            Text("Label", root, new Vector3(0f, -0.062f, -0.004f), display,
-                0.0034f, new Color(1f, 1f, 1f, 0.96f * alpha));
+            Text("Label", root, new Vector3(0f, -0.045f, -0.004f), display,
+                0.0029f, new Color(1f, 1f, 1f, 0.96f * alpha));
 
             var col = root.gameObject.AddComponent<BoxCollider>();
             col.size = new Vector3(TileW + 0.005f, TileH + 0.005f, 0.08f);
@@ -840,7 +1032,7 @@ namespace TakXr.UI
             _buttons.Add(new ToolBtn
             {
                 Root = root,
-                OnClick = () => { onClick?.Invoke(); if (enabled) SetMenu(false); },
+                OnClick = () => { if (enabled) SetMenu(false); onClick?.Invoke(); },
                 Id = id
             });
         }
@@ -889,6 +1081,8 @@ namespace TakXr.UI
             }
 
             PlaceHeadLockedChrome();
+            UpdateMenuButtonVisual();
+            UpdateTiltButtonLabel();
             UpdateCompass();
             BillboardCompassText();
             UpdateTopStatusPill();
@@ -922,6 +1116,8 @@ namespace TakXr.UI
                 activeTool = $"  ·  [TOOL: {tacticalSuite.ActiveMode}]";
             else if (tacticalSuite != null && tacticalSuite.IsTabletopActive)
                 activeTool = "  ·  [3D TABLETOP]";
+            else if (world != null && Mathf.Abs(world.WorldPitchDeg) >= 5f)
+                activeTool = $"  ·  [TILT {Mathf.RoundToInt(world.WorldPitchDeg)}°]";
 
             string netStr = connected ? "TAK ONLINE" : (direct != null ? direct.State.ToUpperInvariant() : "LOCAL");
             _topStatusText.text = $"{cs} [{team}]  ·  {netStr}  ·  3D CoTs: {shown3D}/{totalTracks}{activeTool}";
@@ -975,6 +1171,14 @@ namespace TakXr.UI
                 _dockRoot.rotation = XrUiFacing.RotationFacingUser(_dockRoot.position, camPos);
             }
 
+            // Integrated Dock Tray Anchor: sits directly above the bottom dock so expanded
+            // menus/panels attach to the dock and never collide with or hide underneath it.
+            if (_trayAnchor != null)
+            {
+                _trayAnchor.position = camPos + cameraTransform.TransformDirection(new Vector3(0.04f, 0.16f, 1.55f));
+                _trayAnchor.rotation = XrUiFacing.RotationFacingUser(_trayAnchor.position, camPos);
+            }
+
             // Right Wing of Dock: 3D North Compass Rose
             if (_compassRoot != null)
             {
@@ -989,18 +1193,18 @@ namespace TakXr.UI
                 _topStatusPill.rotation = XrUiFacing.RotationFacingUser(_topStatusPill.position, camPos);
             }
 
-            // All Tools Drawer
-            if (_menuRoot != null && _menuOpen)
+            // All Tools Drawer (anchored in the integrated dock tray)
+            if (_menuRoot != null && _menuOpen && _trayAnchor != null)
             {
-                _menuRoot.position = camPos + cameraTransform.TransformDirection(new Vector3(0f, 0.20f, 1.75f));
-                _menuRoot.rotation = XrUiFacing.RotationFacingUser(_menuRoot.position, camPos);
+                _menuRoot.position = _trayAnchor.position;
+                _menuRoot.rotation = _trayAnchor.rotation;
             }
 
             // Status Toast Banner
             if (_statusLabel != null && _statusLabel.gameObject.activeSelf)
             {
                 var st = _statusLabel.transform;
-                st.position = camPos + cameraTransform.TransformDirection(new Vector3(0f, 0.28f, 1.75f));
+                st.position = camPos + cameraTransform.TransformDirection(new Vector3(0f, 0.31f, 1.65f));
                 XrUiFacing.FaceUser(st, cameraTransform);
             }
         }
@@ -1031,14 +1235,13 @@ namespace TakXr.UI
 
             float headingDeg = Mathf.Atan2(Vector3.Dot(camFwd, east), Vector3.Dot(camFwd, north)) * Mathf.Rad2Deg;
             if (headingDeg < 0f) headingDeg += 360f;
-            float pitchDeg = Mathf.Asin(Mathf.Clamp(cameraTransform.forward.y, -1f, 1f)) * Mathf.Rad2Deg;
+            int worldTilt = Mathf.RoundToInt(world.WorldPitchDeg);
             ApproximateViewerGeo(out double lat, out double lon, out float altM);
 
             int h = ((Mathf.RoundToInt(headingDeg) % 360) + 360) % 360;
             string cardinal = Cardinals16[Mathf.RoundToInt(h / 22.5f) % 16];
-            int tiltI = Mathf.RoundToInt(pitchDeg);
-            string tiltStr = tiltI > 0 ? $"+{tiltI}" : $"{tiltI}";
-            string line1 = $"HDG {h:000}° {cardinal}  TILT {tiltStr}°";
+            string tiltStr = worldTilt > 0 ? $"+{worldTilt}" : $"{worldTilt}";
+            string line1 = $"HDG {h:000}° {cardinal}  EARTH {tiltStr}°";
             string line2 = $"{lat:F5}  {lon:F5}  ALT {Mathf.RoundToInt(altM)} m";
             string key = line1 + "|" + line2;
             if (key == _lastTelem) return;

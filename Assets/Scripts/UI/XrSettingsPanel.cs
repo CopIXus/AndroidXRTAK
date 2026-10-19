@@ -111,14 +111,7 @@ namespace TakXr.UI
 
         void PlaceFacing()
         {
-            if (_cam == null) return;
-            var camPos = _cam.position;
-            var flat = _cam.forward;
-            flat.y = 0f;
-            if (flat.sqrMagnitude < 1e-6f) flat = Vector3.forward;
-            flat.Normalize();
-            _root.position = camPos + flat * 1.7f + Vector3.up * 0.05f;
-            _root.rotation = XrUiFacing.RotationFacingUser(_root.position, camPos);
+            XrUiFacing.PlaceInDockTray(_root, _cam, new Vector3(0f, 0.14f, 1.55f));
         }
 
         void RebuildUi()
@@ -226,11 +219,13 @@ namespace TakXr.UI
                     Hide();
                 });
             AddButton("Flatten", new Vector3(0f, by, -0.01f), new Vector2(0.26f, 0.05f),
-                "Flatten", false, () =>
+                $"Tilt {(_loco != null ? Mathf.RoundToInt(_loco.SavedPitchDeg) : 0)}°", false, () =>
                 {
-                    _loco?.FlattenWorld();
-                    _settings?.SetWorldPitch(0f);
-                    _flash?.Invoke("World flattened");
+                    float next = _loco != null ? _loco.CycleTiltPreset() : 0f;
+                    _settings?.SetWorldPitch(next);
+                    _flash?.Invoke(next <= 2f
+                        ? "Earth Tilt: 0° Flat Floor"
+                        : $"Earth Tilt: {Mathf.RoundToInt(next)}° Upright View");
                     RebuildUi();
                 });
             AddButton("Fit", new Vector3(0.32f, by, -0.01f), new Vector2(0.26f, 0.05f),
@@ -338,6 +333,7 @@ namespace TakXr.UI
         {
             PollSystemKeyboard();
             if (!IsVisible) return;
+            PlaceFacing();
             // Suspend our own click handling while a callsign edit session is up —
             // otherwise rays through the XR keyboard would also hit rows behind it.
             if (_sysKeyboard != null || (_keyboard != null && _keyboard.IsVisible)) return;

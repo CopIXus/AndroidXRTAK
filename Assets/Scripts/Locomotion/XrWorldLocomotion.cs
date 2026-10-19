@@ -6,12 +6,17 @@ namespace TakXr.Locomotion
 {
     /// <summary>
     /// Google Maps immersive-style locomotion: stick fly, trigger/pinch drag-pan,
-    /// two-hand stretch zoom. Moves <see cref="XrWorldRoot"/> only — never the HMD.
+    /// two-hand stretch zoom, and upright God's-Eye Wall/Desk tilt.
+    /// Moves <see cref="XrWorldRoot"/> along its own surface plane (<c>Root.up</c>)
+    /// so controller navigation stays natural whether the Earth is flat below you (0°)
+    /// or tilted up in front of you (38° Desk / 62° Wall View).
     /// </summary>
     public class XrWorldLocomotion : MonoBehaviour
     {
         const float DragThresholdM = 0.003f;
         const float StickDeadzone = 0.12f;
+
+        static readonly float[] TiltPresetDegs = { 0f, 38f, 62f };
 
         [SerializeField] XrWorldRoot world;
         [SerializeField] Transform cameraTransform;
@@ -84,7 +89,8 @@ namespace TakXr.Locomotion
             if (outNow && !_stickWasOut)
             {
                 float dir = stick.x > 0f ? 1f : -1f;
-                world.RotateAboutPointY(cameraTransform.position, dir * 45f * Mathf.Deg2Rad);
+                var pivot = world.GetFocusPivot(cameraTransform);
+                world.RotateAboutMapUp(pivot, dir * 45f * Mathf.Deg2Rad);
                 _snapCooldown = Time.unscaledTime + 0.28f;
                 _stickWasOut = true;
                 map?.NotifyMoving(true);
@@ -99,12 +105,12 @@ namespace TakXr.Locomotion
             var kb = UnityEngine.InputSystem.Keyboard.current;
             if (kb == null) return false;
             float speed = MoveSpeed() * Time.deltaTime;
-            FlatBasis(out var flatFwd, out var right);
+            MapSurfaceBasis(out var mapFwd, out var mapRight, out var mapUp);
             Vector3 move = Vector3.zero;
-            if (kb.wKey.isPressed) move -= flatFwd;
-            if (kb.sKey.isPressed) move += flatFwd;
-            if (kb.aKey.isPressed) move += right;
-            if (kb.dKey.isPressed) move -= right;
+            if (kb.wKey.isPressed) move -= mapFwd;
+            if (kb.sKey.isPressed) move += mapFwd;
+            if (kb.aKey.isPressed) move += mapRight;
+            if (kb.dKey.isPressed) move -= mapRight;
             if (kb.rKey.isPressed)
             {
                 if (kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed)
@@ -112,7 +118,7 @@ namespace TakXr.Locomotion
                     ApplyPitchDelta(55f * Time.deltaTime);
                     return true;
                 }
-                move += Vector3.down;
+                move -= mapUp;
             }
             if (kb.fKey.isPressed)
             {
@@ -121,7 +127,12 @@ namespace TakXr.Locomotion
                     ApplyPitchDelta(-55f * Time.deltaTime);
                     return true;
                 }
-                move += Vector3.up;
+                move += mapUp;
+            }
+            if (kb.tKey.wasPressedThisFrame)
+            {
+                CycleTiltPreset();
+                return true;
             }
             if (move.sqrMagnitude < 1e-6f)
             {
@@ -166,6 +177,7 @@ namespace TakXr.Locomotion
             }
 
             float gain = PanGain();
+            var mapUp = world.Root.up;
 
             if (active.Count == 1)
             {
@@ -177,10 +189,10 @@ namespace TakXr.Locomotion
                 g.moved += delta.magnitude;
                 if (delta.sqrMagnitude > 1e-10f && g.moved > DragThresholdM)
                 {
-                    // Ground-plane pan only — ignore vertical hand motion so tilt
-                    // does not make drag lift/drop the world.
-                    delta.y = 0f;
-                    world.Root.position += delta * gain;
+                    // Pan strictly along the Earth's surface plane (Root.up) so dragging
+                    // when the map is tilted in front of you slides the map without changing altitude.
+                    var planeDelta = Vector3.ProjectOnPlane(delta, mapUp);
+                    world.Root.position += planeDelta * gain;
                     g.lastPos = pos;
                     return true;
                 }
@@ -204,8 +216,7 @@ namespace TakXr.Locomotion
                 else
                 {
                     bool moved = false;
-                    var midDelta = mid - _prevMid;
-                    midDelta.y = 0f;
+                    var midDelta = Vector3.ProjectOnPlane(mid - _prevMid, mapUp);
                     if (midDelta.sqrMagnitude > 0f)
                     {
                         world.Root.position += midDelta * gain;
@@ -223,7 +234,7 @@ namespace TakXr.Locomotion
                     float dAngle = Mathf.DeltaAngle(_prevAngle * Mathf.Rad2Deg, angle * Mathf.Rad2Deg) * Mathf.Deg2Rad;
                     if (Mathf.Abs(dAngle) > 1e-4f)
                     {
-                        world.RotateAboutPointY(mid, dAngle);
+                        world.RotateAboutMapUp(mid, dAngle);
                         moved = true;
                     }
 
@@ -268,6 +279,36 @@ namespace TakXr.Locomotion
             _savedPitchDeg = world.WorldPitchDeg;
         }
 
+        /// <summary>
+        /// Cycles upright God's-Eye tilt presets:
+        /// 0° Flat Floor → 38° Angled Command Desk → 62° Upright Wall Map (look straight ahead).
+        /// </summary>
+        public float CycleTiltPreset()
+        {
+            if (world == null || cameraTransform == null) return _savedPitchDeg;
+            float cur = world.WorldPitchDeg;
+            float next = TiltPresetDegs[0];
+            for (int i = 0; i < TiltPresetDegs.Length; i++)
+            {
+                if (cur < TiltPresetDegs[i] - 8f)
+                {
+                    next = TiltPresetDegs[i];
+                    break;
+                }
+            }
+            SetWorldTilt(next);
+            return next;
+        }
+
+        public void SetWorldTilt(float targetDeg)
+        {
+            if (world == null || cameraTransform == null) return;
+            world.SetWorldPitch(cameraTransform, targetDeg);
+            _savedPitchDeg = world.WorldPitchDeg;
+            _onPitchChanged?.Invoke(_savedPitchDeg);
+            map?.NotifyMoving(true);
+        }
+
         public void RestoreSavedPitch()
         {
             if (world == null || cameraTransform == null) return;
@@ -287,13 +328,13 @@ namespace TakXr.Locomotion
         {
             bool tilting = XrHandPinchInput.IsTiltModifierHeld();
             float speed = MoveSpeed() * Time.deltaTime;
-            FlatBasis(out var flatFwd, out var right);
-            var camPos = cameraTransform.position;
+            MapSurfaceBasis(out var mapFwd, out var mapRight, out var mapUp);
             bool navigated = false;
             bool hasRight = XrHandPinchInput.HasStick(1);
 
-            // Left stick browse (horizontal pan). Forward/back matches keyboard W/S:
-            // stick forward → fly forward (world moves opposite look / map comes toward you).
+            // Left stick: pan across the Earth's surface plane (mapFwd / mapRight).
+            // When the Earth is tilted up in front of you, pushing the stick forward
+            // slides the terrain across the tilted plane rather than driving it into your face!
             if (XrHandPinchInput.TryGetStick(0, out var left) && left.magnitude > StickDeadzone)
             {
                 if (tilting)
@@ -301,25 +342,28 @@ namespace TakXr.Locomotion
                     // Y is consumed by world tilt; keep strafe on X.
                     if (Mathf.Abs(left.x) > StickDeadzone)
                     {
-                        world.Root.position += (-right * left.x) * speed;
+                        world.Root.position += (-mapRight * left.x) * speed;
                         navigated = true;
                     }
                 }
                 else
                 {
-                    world.Root.position += (-flatFwd * left.y - right * left.x) * speed;
+                    world.Root.position += (-mapFwd * left.y - mapRight * left.x) * speed;
                     navigated = true;
                 }
             }
 
-            // Right stick: altitude + continuous yaw (snap-turn uses discrete X press when enabled).
+            // Right stick: zoom/altitude along map surface normal (mapUp) + yaw around mapUp.
             if (hasRight && XrHandPinchInput.TryGetStick(1, out var rstick) &&
                 rstick.magnitude > StickDeadzone)
             {
-                if (!tilting)
-                    world.Root.position += Vector3.down * (rstick.y * speed);
-                if (!_snapTurnEnabled)
-                    world.RotateAboutPointY(camPos, -rstick.x * 1.8f * Time.deltaTime);
+                if (!tilting && Mathf.Abs(rstick.y) > StickDeadzone)
+                    world.Root.position += (-mapUp) * (rstick.y * speed);
+                if (!_snapTurnEnabled && Mathf.Abs(rstick.x) > StickDeadzone)
+                {
+                    var pivot = world.GetFocusPivot(cameraTransform);
+                    world.RotateAboutMapUp(pivot, -rstick.x * 1.8f * Time.deltaTime);
+                }
                 navigated = true;
             }
 
@@ -333,6 +377,25 @@ namespace TakXr.Locomotion
             if (flatFwd.sqrMagnitude < 1e-6f) flatFwd = Vector3.forward;
             flatFwd.Normalize();
             right = Vector3.Cross(Vector3.up, flatFwd).normalized;
+        }
+
+        /// <summary>
+        /// Computes camera-aligned forward and right vectors projected onto the Earth's
+        /// current surface plane (<c>world.Root.up</c>). At 0° pitch this equals horizontal
+        /// ground movement; at 38°–62° pitch it glides smoothly along the tilted map wall.
+        /// </summary>
+        void MapSurfaceBasis(out Vector3 mapFwd, out Vector3 mapRight, out Vector3 mapUp)
+        {
+            mapUp = world != null ? world.Root.up : Vector3.up;
+            FlatBasis(out var flatFwd, out var flatRight);
+
+            mapRight = Vector3.ProjectOnPlane(flatRight, mapUp);
+            if (mapRight.sqrMagnitude < 1e-6f) mapRight = flatRight;
+            mapRight.Normalize();
+
+            mapFwd = Vector3.Cross(mapRight, mapUp);
+            if (mapFwd.sqrMagnitude < 1e-6f) mapFwd = flatFwd;
+            mapFwd.Normalize();
         }
 
         /// <summary>
@@ -355,8 +418,8 @@ namespace TakXr.Locomotion
         public void TeleportForward(float meters = 120f)
         {
             if (world == null || cameraTransform == null) return;
-            FlatBasis(out var flatFwd, out _);
-            world.Root.position -= flatFwd * meters;
+            MapSurfaceBasis(out var mapFwd, out _, out _);
+            world.Root.position -= mapFwd * meters;
             map?.NotifyMoving(true);
         }
 
@@ -370,7 +433,8 @@ namespace TakXr.Locomotion
         public void ZoomAtCamera(float factor)
         {
             if (world == null || cameraTransform == null) return;
-            world.ScaleAboutPoint(cameraTransform.position, factor);
+            var pivot = world.GetFocusPivot(cameraTransform);
+            world.ScaleAboutPoint(pivot, factor);
             map?.NotifyMoving(true);
         }
 
@@ -388,6 +452,8 @@ namespace TakXr.Locomotion
         public void FrameWorldPoint(Vector3 worldPoint, float overviewDistM = 160f, float heightM = 50f)
         {
             if (world == null || cameraTransform == null) return;
+            float pitch = _savedPitchDeg;
+            world.Flatten(cameraTransform);
             world.Root.localScale = Vector3.one;
             var camPos = cameraTransform.position;
             FlatBasis(out var flatFwd, out _);
@@ -395,6 +461,7 @@ namespace TakXr.Locomotion
             var desiredMarker = camPos + flatFwd * overviewDistM + Vector3.down * heightM;
             world.Root.position += desiredMarker - worldPoint;
             world.OrientNorth(cameraTransform);
+            _savedPitchDeg = pitch;
             RestoreSavedPitch();
             map?.NotifyMoving(true);
         }

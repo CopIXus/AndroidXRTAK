@@ -132,14 +132,7 @@ namespace TakXr.UI
 
         void PlaceFacing()
         {
-            if (_cam == null) return;
-            var camPos = _cam.position;
-            var flat = _cam.forward;
-            flat.y = 0f;
-            if (flat.sqrMagnitude < 1e-6f) flat = Vector3.forward;
-            flat.Normalize();
-            _root.position = camPos + flat * 1.7f + Vector3.up * 0.05f;
-            _root.rotation = XrUiFacing.RotationFacingUser(_root.position, camPos);
+            XrUiFacing.PlaceInDockTray(_root, _cam, new Vector3(0f, 0.14f, 1.55f));
         }
 
         void RebuildUi()
@@ -867,6 +860,7 @@ namespace TakXr.UI
         void Update()
         {
             if (!IsVisible) return;
+            PlaceFacing();
 
             if (_mode == Mode.List && Time.unscaledTime >= _nextAutoRefresh)
             {

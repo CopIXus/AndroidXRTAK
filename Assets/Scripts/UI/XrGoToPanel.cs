@@ -148,10 +148,7 @@ namespace TakXr.UI
 
         void PlaceFacing()
         {
-            if (_cam == null || _root == null) return;
-            var pos = _cam.position + _cam.TransformDirection(new Vector3(0f, -0.05f, 1.6f));
-            _root.position = pos;
-            _root.rotation = XrUiFacing.RotationFacingUser(pos, _cam.position);
+            XrUiFacing.PlaceInDockTray(_root, _cam, new Vector3(0f, 0.14f, 1.55f));
         }
 
         void LateUpdate()

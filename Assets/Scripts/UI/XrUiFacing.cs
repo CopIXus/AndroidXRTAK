@@ -20,6 +20,24 @@ namespace TakXr.UI
     /// </summary>
     public static class XrUiFacing
     {
+        public static Transform DockTrayAnchor { get; set; }
+
+        public static void PlaceInDockTray(Transform panelRoot, Transform camera, Vector3 fallbackCamLocalOffset)
+        {
+            if (panelRoot == null) return;
+            if (DockTrayAnchor != null)
+            {
+                panelRoot.position = DockTrayAnchor.position;
+                panelRoot.rotation = DockTrayAnchor.rotation;
+                return;
+            }
+            if (camera == null && Camera.main != null) camera = Camera.main.transform;
+            if (camera == null) return;
+            var pos = camera.position + camera.TransformDirection(fallbackCamLocalOffset);
+            panelRoot.position = pos;
+            panelRoot.rotation = RotationFacingUser(pos, camera.position);
+        }
+
         public static void FaceUser(Transform t, Transform camera)
         {
             if (t == null || camera == null) return;

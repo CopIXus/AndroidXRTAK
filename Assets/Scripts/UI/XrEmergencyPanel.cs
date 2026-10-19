@@ -165,15 +165,7 @@ namespace TakXr.UI
 
         void PlaceFacing()
         {
-            if (_cam == null && Camera.main != null) _cam = Camera.main.transform;
-            if (_cam == null) return;
-            var camPos = _cam.position;
-            var flat = _cam.forward;
-            flat.y = 0f;
-            if (flat.sqrMagnitude < 1e-6f) flat = Vector3.forward;
-            flat.Normalize();
-            _root.position = camPos + flat * 1.60f + Vector3.up * -0.02f;
-            _root.rotation = XrUiFacing.RotationFacingUser(_root.position, camPos);
+            XrUiFacing.PlaceInDockTray(_root, _cam, new Vector3(0f, 0.14f, 1.55f));
         }
 
         void RebuildUi()
@@ -402,6 +394,7 @@ namespace TakXr.UI
             }
 
             if (!IsVisible) return;
+            PlaceFacing();
             for (int h = 0; h < 2; h++)
             {
                 bool aimOk = XrHandPinchInput.TryGetAim(h, out var origin, out var fwd);

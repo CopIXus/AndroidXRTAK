@@ -388,20 +388,30 @@ namespace TakXr.UI
             bg.name = "Bg";
             bg.transform.SetParent(_optsRoot, false);
             bg.transform.localPosition = new Vector3(0f, 0f, 0.008f);
-            bg.transform.localScale = new Vector3(0.72f, 0.12f, 1f);
+            bg.transform.localScale = new Vector3(0.88f, 0.115f, 1f);
             Destroy(bg.GetComponent<Collider>());
             var r = bg.GetComponent<Renderer>();
             var mat = new Material(Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color"));
-            mat.color = new Color(0.04f, 0.06f, 0.1f, 0.92f);
+            mat.color = new Color(0.03f, 0.07f, 0.13f, 0.95f);
             mat.renderQueue = 2990;
             r.sharedMaterial = mat;
-            _optsLabel = XrText.Make("Opts", _optsRoot, new Vector3(0f, 0f, -0.004f), "",
-                0.0045f, new Color(0.85f, 0.95f, 1f, 0.95f));
+            _optsLabel = XrText.Make("Opts", _optsRoot, new Vector3(0f, 0.025f, -0.004f), "",
+                0.0044f, new Color(0.88f, 0.96f, 1f, 0.98f));
 
-            // Cycle buttons
-            AddOptBtn("Aff", new Vector3(-0.22f, -0.055f, -0.002f), "AFF", CycleAffiliation);
-            AddOptBtn("Col", new Vector3(0f, -0.055f, -0.002f), "COLOR", CycleStrokeColor);
-            AddOptBtn("Cs", new Vector3(0.22f, -0.055f, -0.002f), "NAME", CycleDrawCallsign);
+            // Cycle buttons + Done/Close button
+            AddOptBtn("Aff", new Vector3(-0.30f, -0.024f, -0.002f), "AFF", CycleAffiliation);
+            AddOptBtn("Col", new Vector3(-0.10f, -0.024f, -0.002f), "COLOR", CycleStrokeColor);
+            AddOptBtn("Cs", new Vector3(0.10f, -0.024f, -0.002f), "NAME", CycleDrawCallsign);
+            AddOptBtn("Done", new Vector3(0.30f, -0.024f, -0.002f), "DONE / X", () =>
+            {
+                if ((_mode == Mode.Route || _mode == Mode.Polygon) && _verts.Count >= 2)
+                    FinishShape();
+                else
+                {
+                    Cancel();
+                    _flash?.Invoke("Draw closed");
+                }
+            });
         }
 
         void AddOptBtn(string id, Vector3 pos, string label, Action onClick)
@@ -440,7 +450,8 @@ namespace TakXr.UI
             if (_mode == Mode.None || _cam == null || _optsRoot == null) return;
             if (!_optsRoot.gameObject.activeSelf) return;
             var camPos = _cam.position;
-            _optsRoot.position = camPos + _cam.TransformDirection(new Vector3(0f, -0.42f, 1.6f));
+            // Attach directly above the bottom dock as an integrated sub-bar instead of floating under the dock.
+            _optsRoot.position = camPos + _cam.TransformDirection(new Vector3(0f, -0.20f, 1.54f));
             _optsRoot.rotation = XrUiFacing.RotationFacingUser(_optsRoot.position, camPos);
 
             if (Time.unscaledTime < _nextOptClick) return;

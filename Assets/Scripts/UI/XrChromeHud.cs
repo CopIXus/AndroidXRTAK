@@ -12,18 +12,19 @@ using UnityEngine.Networking;
 namespace TakXr.UI
 {
     /// <summary>
-    /// Modern Stitch-inspired spatial XR HUD for Android XR TAK:
-    /// - Curved Bottom Spatial Dock with:
-    ///   1. Left Wing: Interactive 3D World Globe (<see cref="XrMiniWorldGlobe"/>) showing live 3D CoT blips
-    ///   2. Center Bar: 8 ergonomic Quick-Action buttons (Drop Pt, Draw/Rte, Overlays, GeoChat,
-    ///      SPI Laser, Nav 3D, Tilt View, All Tools)
-    ///   3. Right Wing: 3D North Compass Rose &amp; live HDG / Lat-Lon-Alt telemetry
-    /// - Integrated Expandable Tray above the Bottom Dock:
-    ///   Clicking any tool/menu button expands the bottom dock upward into a unified tray
-    ///   (housing Overlays, GeoChat, Channels, Maps, Servers, Settings, Info, Video, or the
-    ///   All Tools grid) with a 1-tap "▼ Collapse Menu" bar to fold everything back down cleanly.
-    /// - Top Tactical Status Pill: Callsign/Team badge, TAK TLS status, 3D track count,
-    ///   Immerse 360°, Wall Tilt, 3D Demo, and 911/Medevac buttons.
+    /// Spatial XR HUD for Android XR TAK:
+    /// - Collapsible Bottom Spatial Dock:
+    ///   1. Right Pod (always visible): `<` / `>` Slide Toggle button + Hamburger (`All Tools`) button,
+    ///      with the operator Callsign/Team badge (`XR-USER [Cyan]`) directly underneath the Hamburger menu.
+    ///   2. Sliding Quick-Action Bar (`_quickBarRoot`):
+    ///      Clicking `<` slides the 7 quick-action buttons out to the left, pushing the 3D World Globe
+    ///      to the left and pushing the Center Compass down below the bar.
+    ///      Clicking `>` slides the quick bar back in, pulling the 3D World Globe back to the left of
+    ///      the compass and pulling the Compass back up to the center (#1).
+    ///   3. Center Compass (#1) + Unified Telemetry Block underneath it:
+    ///      Displays the 3D North Compass Rose in the center with HDG/Tilt, Lat/Lon/Alt, and
+    ///      TAK connection / 3D CoT count stacked cleanly underneath the compass.
+    ///   4. Integrated Expandable Tray above the dock when Hamburger (`All Tools`) or any panel opens.
     /// </summary>
     public class XrChromeHud : MonoBehaviour
     {
@@ -68,17 +69,28 @@ namespace TakXr.UI
         Transform _telemRoot;
         TextMesh _telemHdg;
         TextMesh _telemGeo;
+        TextMesh _telemTak;
         string _lastTelem = "";
         int _drawCycle;
 
         Transform _dockRoot;
+        Transform _dockBg;
+        Transform _dockTopAccent;
+        Transform _quickBarRoot;
+        Transform _globeHost;
+        Transform _slideArrowBtn;
+        TextMesh _slideArrowGlyph;
+        TextMesh _slideArrowSub;
+        Transform _userBadgeRoot;
+        TextMesh _userBadgeText;
+        Renderer _userLedRend;
+        bool _quickBarExpanded;
+        float _quickSlideT; // 0 = collapsed, 1 = expanded out to the left
+
         Transform _trayAnchor;
         Transform _collapseStrip;
         TextMesh _collapseStripLabel;
         TextMesh _dockTiltLabel;
-        Transform _topStatusPill;
-        TextMesh _topStatusText;
-        Renderer _topLedRend;
         XrMiniWorldGlobe _miniGlobe;
 
         Transform _menuRoot;
@@ -95,7 +107,7 @@ namespace TakXr.UI
         readonly List<ToolBtn> _buttons = new List<ToolBtn>();
         readonly List<ToolDef> _toolCatalog = new List<ToolDef>();
         float _nextClickTime;
-        float _nextTopPillUpdate;
+        float _nextUserBadgeUpdate;
         readonly bool[] _wasGrabbing = new bool[2];
         bool _takConnected;
         float _nextHealthPoll;
@@ -188,11 +200,10 @@ namespace TakXr.UI
                 cameraTransform = Camera.main.transform;
 
             BuildCompass();
-            BuildTopStatusPill();
             BuildSpatialDock();
             BuildStatus();
-            _statusHideAt = Time.unscaledTime + 5f;
-            FlashStatus("TAKXR 3D Ready · Tap 'Tilt View' to stand up & look straight ahead at the Earth");
+            _statusHideAt = Time.unscaledTime + 4.5f;
+            FlashStatus("TAKXR Ready · Tap < to slide out quick tools or ☰ for All Tools");
         }
 
         void OnDestroy()
@@ -206,17 +217,17 @@ namespace TakXr.UI
             _compassRoot = new GameObject("Compass").transform;
             _compassRoot.SetParent(transform, false);
 
-            CreateRingLine("Ring", _compassRoot, 0.040f, 48,
-                new Color(0.25f, 0.85f, 1f, 0.78f), 0.0026f);
+            CreateRingLine("Ring", _compassRoot, 0.042f, 48,
+                new Color(0.25f, 0.85f, 1f, 0.82f), 0.0028f);
 
             // Lubber line = look direction (fixed at far edge / local +Z).
             CreateLine("LookLine", _compassRoot,
                 new Vector3(0f, 0.002f, 0.0f),
-                new Vector3(0f, 0.002f, 0.054f),
+                new Vector3(0f, 0.002f, 0.056f),
                 new Color(1f, 1f, 1f, 0.95f), 0.003f);
             CreateLine("LookTick", _compassRoot,
-                new Vector3(-0.006f, 0.002f, 0.048f),
-                new Vector3(0f, 0.002f, 0.048f),
+                new Vector3(-0.006f, 0.002f, 0.050f),
+                new Vector3(0.006f, 0.002f, 0.050f),
                 new Color(1f, 1f, 1f, 0.9f), 0.0025f);
 
             // North group rotates so N sits toward geographic north.
@@ -224,86 +235,28 @@ namespace TakXr.UI
             _northGroup.SetParent(_compassRoot, false);
             CreateLine("NorthNeedle", _northGroup,
                 Vector3.zero,
-                new Vector3(0f, 0.002f, 0.044f),
-                new Color(0.25f, 0.92f, 1f, 0.98f), 0.0034f);
-            _northLabel = Text("N", _northGroup, new Vector3(0f, 0.003f, 0.054f),
+                new Vector3(0f, 0.002f, 0.046f),
+                new Color(0.25f, 0.92f, 1f, 0.98f), 0.0035f);
+            _northLabel = Text("N", _northGroup, new Vector3(0f, 0.003f, 0.056f),
                 "N", 0.0028f, new Color(1f, 1f, 1f, 0.98f));
 
+            // Unified telemetry & TAK status block sitting directly underneath the Compass (#1)
             _telemRoot = new GameObject("Telem").transform;
             _telemRoot.SetParent(_compassRoot, false);
-            _telemRoot.localPosition = new Vector3(0f, -0.002f, -0.072f);
-            _telemHdg = XrText.Make("Hdg", _telemRoot, new Vector3(0f, 0.009f, 0f), "",
-                0.0019f, new Color(0.88f, 0.97f, 1f, 0.96f),
-                TextAnchor.MiddleCenter, TextAlignment.Center);
-            _telemGeo = XrText.Make("Geo", _telemRoot, new Vector3(0f, -0.004f, 0f), "",
-                0.0016f, new Color(0.72f, 0.88f, 1f, 0.92f),
-                TextAnchor.MiddleCenter, TextAlignment.Center);
-        }
+            _telemRoot.localPosition = new Vector3(0f, -0.010f, -0.078f);
 
-        void BuildTopStatusPill()
-        {
-            _topStatusPill = new GameObject("TopStatusPill").transform;
-            _topStatusPill.SetParent(transform, false);
+            Quad("TelemBg", _telemRoot, new Vector3(0f, -0.006f, 0.004f), new Vector2(0.42f, 0.068f),
+                new Color(0.02f, 0.06f, 0.11f, 0.84f), 2993);
 
-            Quad("PillBg", _topStatusPill, new Vector3(0f, 0f, 0.006f), new Vector2(1.16f, 0.068f),
-                new Color(0.03f, 0.07f, 0.13f, 0.90f), 2994);
-            Quad("PillTrim", _topStatusPill, new Vector3(0f, -0.032f, 0.004f), new Vector2(1.16f, 0.004f),
-                new Color(0.15f, 0.82f, 1f, 0.85f), 2996);
-
-            // Status LED sphere
-            var led = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            led.name = "TakLed";
-            Destroy(led.GetComponent<Collider>());
-            led.transform.SetParent(_topStatusPill, false);
-            led.transform.localPosition = new Vector3(-0.53f, 0f, -0.004f);
-            led.transform.localScale = Vector3.one * 0.020f;
-            _topLedRend = led.GetComponent<Renderer>();
-            if (_topLedRend != null)
-                _topLedRend.sharedMaterial = Cot3dModelFactory.GetLitMaterial(new Color(0.2f, 0.95f, 0.5f, 1f), 0.8f);
-
-            _topStatusText = XrText.Make("TopTelemetry", _topStatusPill, new Vector3(-0.50f, 0f, -0.004f),
-                "TAKXR 3D  ·  Initializing…", 0.0038f, new Color(0.90f, 0.97f, 1f, 0.98f),
-                TextAnchor.MiddleLeft, TextAlignment.Left, maxWidthM: 0.44f, maxHeightM: 0.044f);
-
-            // Quick Upright God's-Eye Wall Tilt button on top pill
-            AddPillButton("top_tilt", new Vector3(0.03f, 0f, -0.002f), new Vector2(0.14f, 0.048f),
-                "Wall Tilt", new Color(0.16f, 0.36f, 0.62f, 0.96f), CycleGodsEyeTilt);
-
-            // Quick 1:1 360° Ground Immersion + X-Ray Occlusion button on top pill
-            AddPillButton("top_immerse", new Vector3(0.19f, 0f, -0.002f), new Vector2(0.15f, 0.048f),
-                "Immerse 360°", new Color(0.08f, 0.48f, 0.36f, 0.96f), () =>
-                {
-                    tacticalSuite?.ToggleImmersiveGroundView();
-                });
-
-            // Quick 3D Demo Spawn button on top pill
-            AddPillButton("top_demo3d", new Vector3(0.35f, 0f, -0.002f), new Vector2(0.13f, 0.048f),
-                "3D Demo", new Color(0.12f, 0.42f, 0.58f, 0.95f), () =>
-                {
-                    overlayManagerPanel?.ToggleDemoFormation();
-                });
-
-            // Quick 911 / CASEVAC button on top pill
-            AddPillButton("top_911", new Vector3(0.495f, 0f, -0.002f), new Vector2(0.14f, 0.048f),
-                "911 / MED", new Color(0.68f, 0.14f, 0.16f, 0.96f), () =>
-                {
-                    bool wasOpen = emergencyPanel != null && emergencyPanel.IsVisible;
-                    CollapseAllMenus();
-                    if (!wasOpen) emergencyPanel?.ShowEmergency(cameraTransform);
-                });
-        }
-
-        void AddPillButton(string id, Vector3 localPos, Vector2 size, string label, Color bg, Action onClick)
-        {
-            var root = new GameObject("PillBtn_" + id).transform;
-            root.SetParent(_topStatusPill, false);
-            root.localPosition = localPos;
-            Quad("Bg", root, Vector3.zero, size, bg, 2998);
-            XrText.Make("Lbl", root, new Vector3(0f, 0f, -0.004f), label, 0.0044f, Color.white);
-            var col = root.gameObject.AddComponent<BoxCollider>();
-            col.size = new Vector3(size.x + 0.01f, size.y + 0.01f, 0.05f);
-            col.isTrigger = true;
-            _buttons.Add(new ToolBtn { Root = root, OnClick = onClick, Id = id });
+            _telemHdg = XrText.Make("Hdg", _telemRoot, new Vector3(0f, 0.014f, -0.002f), "",
+                0.0020f, new Color(0.92f, 0.98f, 1f, 0.98f),
+                TextAnchor.MiddleCenter, TextAlignment.Center, maxWidthM: 0.39f);
+            _telemGeo = XrText.Make("Geo", _telemRoot, new Vector3(0f, -0.005f, -0.002f), "",
+                0.0017f, new Color(0.76f, 0.90f, 1f, 0.95f),
+                TextAnchor.MiddleCenter, TextAlignment.Center, maxWidthM: 0.39f);
+            _telemTak = XrText.Make("TakInfo", _telemRoot, new Vector3(0f, -0.023f, -0.002f), "",
+                0.0016f, new Color(0.55f, 0.92f, 0.78f, 0.95f),
+                TextAnchor.MiddleCenter, TextAlignment.Center, maxWidthM: 0.39f);
         }
 
         void BuildSpatialDock()
@@ -317,18 +270,16 @@ namespace TakXr.UI
             _trayAnchor.SetParent(transform, false);
             XrUiFacing.DockTrayAnchor = _trayAnchor;
 
-            // Sleek dark glassmorphic dock plate with cyan top border
-            const float dockW = 1.18f;
-            const float dockH = 0.155f;
-            Quad("DockBg", _dockRoot, new Vector3(0.06f, 0f, 0.008f), new Vector2(dockW, dockH),
-                new Color(0.03f, 0.07f, 0.13f, 0.92f), 2994);
-            Quad("DockTopAccent", _dockRoot, new Vector3(0.06f, dockH * 0.5f - 0.004f, 0.005f),
-                new Vector2(dockW, 0.006f), new Color(0.16f, 0.82f, 1f, 0.95f), 2996);
+            const float dockH = 0.150f;
+            _dockBg = Quad("DockBg", _dockRoot, new Vector3(0.49f, 0f, 0.008f), new Vector2(0.24f, dockH),
+                new Color(0.03f, 0.07f, 0.13f, 0.92f), 2994).transform;
+            _dockTopAccent = Quad("DockTopAccent", _dockRoot, new Vector3(0.49f, dockH * 0.5f - 0.004f, 0.005f),
+                new Vector2(0.24f, 0.006f), new Color(0.16f, 0.82f, 1f, 0.95f), 2996).transform;
 
             // Collapse Bar perched on top edge of dock whenever any panel/drawer is expanded
             _collapseStrip = new GameObject("DockCollapseStrip").transform;
             _collapseStrip.SetParent(_dockRoot, false);
-            _collapseStrip.localPosition = new Vector3(0.06f, dockH * 0.5f + 0.034f, -0.002f);
+            _collapseStrip.localPosition = new Vector3(0.04f, dockH * 0.5f + 0.034f, -0.002f);
             Quad("CollapseBg", _collapseStrip, Vector3.zero, new Vector2(0.56f, 0.048f),
                 new Color(0.10f, 0.34f, 0.54f, 0.97f), 3004);
             Quad("CollapseAccent", _collapseStrip, new Vector3(0f, 0.022f, -0.001f), new Vector2(0.56f, 0.004f),
@@ -350,24 +301,43 @@ namespace TakXr.UI
             });
             _collapseStrip.gameObject.SetActive(false);
 
-            // Left Wing of Dock: Interactive 3D World Globe showing live CoT locations
-            var globeHost = new GameObject("GlobeWidgetHost").transform;
-            globeHost.SetParent(_dockRoot, false);
-            globeHost.localPosition = new Vector3(-0.62f, 0.01f, 0f);
-            _miniGlobe = globeHost.gameObject.AddComponent<XrMiniWorldGlobe>();
+            // 3D World Globe: sits just to the left of the center compass when collapsed,
+            // and slides left when the quick toolbar expands out.
+            _globeHost = new GameObject("GlobeWidgetHost").transform;
+            _globeHost.SetParent(_dockRoot, false);
+            _globeHost.localPosition = new Vector3(-0.24f, 0.01f, 0f);
+            _miniGlobe = _globeHost.gameObject.AddComponent<XrMiniWorldGlobe>();
             _miniGlobe.Configure(config, feed, cameraTransform);
 
-            var globeCol = globeHost.gameObject.AddComponent<BoxCollider>();
+            var globeCol = _globeHost.gameObject.AddComponent<BoxCollider>();
             globeCol.size = new Vector3(0.18f, 0.18f, 0.18f);
             globeCol.isTrigger = true;
             _buttons.Add(new ToolBtn
             {
-                Root = globeHost,
+                Root = _globeHost,
                 Id = "dock_globe3d",
                 OnClick = () => _miniGlobe.CycleGlobeMode(FlashStatus),
             });
 
-            // 8 Ergonomic Quick-Action Buttons across the Spatial Dock
+            // 1. Hamburger ("All Tools") button anchored on the right (x = +0.545f)
+            AddDockButton(_dockRoot, "menu", "hamburger", "All Tools", new Vector3(0.545f, 0f, 0f), () =>
+            {
+                if (_menuOpen || IsAnyTrayPanelOpen())
+                    CollapseAllMenus();
+                else
+                    SetMenu(true);
+            });
+
+            // 2. `<` / `>` Slide Arrow button immediately to the LEFT of the Hamburger menu (x = +0.430f)
+            BuildSlideArrowButton(new Vector3(0.430f, 0f, 0f));
+
+            // 3. Username / Callsign badge sitting directly UNDER the Hamburger menu
+            BuildUserBadgeUnderHamburger(new Vector3(0.495f, -0.098f, 0f));
+
+            // 4. Sliding Quick-Action Bar (slides out to the left of the `<` button when expanded)
+            _quickBarRoot = new GameObject("QuickBarSlideRoot").transform;
+            _quickBarRoot.SetParent(_dockRoot, false);
+
             var quickItems = new (string id, string icon, string label, Action act)[]
             {
                 ("q_point", "pointadd", "Drop Pt", () =>
@@ -402,23 +372,17 @@ namespace TakXr.UI
                     CollapseAllMenus();
                     tacticalSuite?.ToggleQuickNav();
                 }),
-                ("q_tilt", "orientation", "Tilt View", CycleGodsEyeTilt),
-                ("menu", "hamburger", "All Tools", () =>
-                {
-                    if (_menuOpen || IsAnyTrayPanelOpen())
-                        CollapseAllMenus();
-                    else
-                        SetMenu(true);
-                }),
+                ("q_tilt", "orientation", "Tilt: 0°", CycleGodsEyeTilt),
             };
 
-            const float step = 0.140f;
-            float startX = -0.43f;
+            const float step = 0.132f;
+            // Rightmost quick item sits at x = +0.305f (just left of the `<` arrow button at +0.430f)
+            float startX = 0.305f - (quickItems.Length - 1) * step; // -0.487f
             for (int i = 0; i < quickItems.Length; i++)
             {
                 float bx = startX + i * step;
                 var item = quickItems[i];
-                AddDockButton(item.id, item.icon, item.label, new Vector3(bx, 0f, 0f), item.act);
+                AddDockButton(_quickBarRoot, item.id, item.icon, item.label, new Vector3(bx, 0f, 0f), item.act);
             }
 
             foreach (var b in _buttons)
@@ -436,7 +400,120 @@ namespace TakXr.UI
                 }
             }
 
+            // Start collapsed so the Compass sits in the middle (#1) with the Globe to its left
+            _quickBarExpanded = false;
+            _quickSlideT = 0f;
+            ApplyQuickBarSlideLayout(immediate: true);
+
             BuildMenu();
+        }
+
+        void BuildSlideArrowButton(Vector3 localPos)
+        {
+            _slideArrowBtn = new GameObject("Dock_slide_arrow").transform;
+            _slideArrowBtn.SetParent(_dockRoot, false);
+            _slideArrowBtn.localPosition = localPos;
+
+            Quad("CellBg", _slideArrowBtn, new Vector3(0f, 0f, 0.004f), new Vector2(0.082f, 0.128f),
+                new Color(0.10f, 0.24f, 0.40f, 0.96f), 2998);
+            _slideArrowGlyph = XrText.Make("ArrowGlyph", _slideArrowBtn, new Vector3(0f, 0.014f, -0.004f),
+                "<", 0.0076f, new Color(0.35f, 0.92f, 1f, 1f),
+                TextAnchor.MiddleCenter, TextAlignment.Center, maxWidthM: 0.070f);
+            _slideArrowSub = XrText.Make("ArrowSub", _slideArrowBtn, new Vector3(0f, -0.044f, -0.004f),
+                "Tools", 0.0026f, new Color(0.88f, 0.96f, 1f, 0.95f),
+                TextAnchor.MiddleCenter, TextAlignment.Center, maxWidthM: 0.074f);
+
+            var col = _slideArrowBtn.gameObject.AddComponent<BoxCollider>();
+            col.size = new Vector3(0.090f, 0.135f, 0.08f);
+            col.isTrigger = true;
+            _buttons.Add(new ToolBtn
+            {
+                Root = _slideArrowBtn,
+                Id = "dock_slide_arrow",
+                OnClick = ToggleQuickBarExpanded,
+            });
+        }
+
+        void BuildUserBadgeUnderHamburger(Vector3 localPos)
+        {
+            _userBadgeRoot = new GameObject("UserBadgeUnderHamburger").transform;
+            _userBadgeRoot.SetParent(_dockRoot, false);
+            _userBadgeRoot.localPosition = localPos;
+
+            Quad("Bg", _userBadgeRoot, new Vector3(0f, 0f, 0.005f), new Vector2(0.225f, 0.038f),
+                new Color(0.03f, 0.07f, 0.13f, 0.92f), 2996);
+
+            var led = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            led.name = "TakLed";
+            Destroy(led.GetComponent<Collider>());
+            led.transform.SetParent(_userBadgeRoot, false);
+            led.transform.localPosition = new Vector3(-0.094f, 0f, -0.003f);
+            led.transform.localScale = Vector3.one * 0.013f;
+            _userLedRend = led.GetComponent<Renderer>();
+            if (_userLedRend != null)
+                _userLedRend.sharedMaterial = Cot3dModelFactory.GetLitMaterial(new Color(0.2f, 0.95f, 0.5f, 1f), 0.8f);
+
+            _userBadgeText = XrText.Make("UserLbl", _userBadgeRoot, new Vector3(0.008f, 0f, -0.004f),
+                "XR-USER", 0.0030f, new Color(0.92f, 0.98f, 1f, 0.98f),
+                TextAnchor.MiddleCenter, TextAlignment.Center, maxWidthM: 0.185f, maxHeightM: 0.032f);
+        }
+
+        void ToggleQuickBarExpanded()
+        {
+            _quickBarExpanded = !_quickBarExpanded;
+            if (_slideArrowGlyph != null)
+                _slideArrowGlyph.text = _quickBarExpanded ? ">" : "<";
+            if (_slideArrowSub != null)
+                _slideArrowSub.text = _quickBarExpanded ? "Hide" : "Tools";
+        }
+
+        void ApplyQuickBarSlideLayout(bool immediate = false)
+        {
+            float target = _quickBarExpanded ? 1f : 0f;
+            if (immediate)
+                _quickSlideT = target;
+            else
+                _quickSlideT = Mathf.MoveTowards(_quickSlideT, target, Time.unscaledDeltaTime * 5.5f);
+
+            float s = Mathf.SmoothStep(0f, 1f, _quickSlideT);
+
+            // 1. Slide & scale QuickBar out to the left from the `<` button (x = +0.36f)
+            if (_quickBarRoot != null)
+            {
+                bool active = s > 0.03f;
+                if (_quickBarRoot.gameObject.activeSelf != active)
+                    _quickBarRoot.gameObject.SetActive(active);
+                if (active)
+                {
+                    _quickBarRoot.localPosition = new Vector3(Mathf.Lerp(0.36f, 0f, s), 0f, 0f);
+                    _quickBarRoot.localScale = new Vector3(Mathf.Max(0.01f, s), 1f, 1f);
+                }
+            }
+
+            // 2. Resize & shift Dock background plate so it wraps only the `<` + `☰` pod when collapsed
+            //    and expands left across the quick toolbar when slid out.
+            const float dockH = 0.150f;
+            float dockW = Mathf.Lerp(0.245f, 1.19f, s);
+            float dockCenterX = Mathf.Lerp(0.490f, 0.035f, s);
+            if (_dockBg != null)
+            {
+                _dockBg.localPosition = new Vector3(dockCenterX, 0f, 0.008f);
+                _dockBg.localScale = new Vector3(dockW, dockH, 1f);
+            }
+            if (_dockTopAccent != null)
+            {
+                _dockTopAccent.localPosition = new Vector3(dockCenterX, dockH * 0.5f - 0.004f, 0.005f);
+                _dockTopAccent.localScale = new Vector3(dockW, 0.006f, 1f);
+            }
+
+            // 3. Push the 3D World Globe to the left when the toolbar slides out,
+            //    and pull it back to the left of the center Compass (#1) when collapsed!
+            if (_globeHost != null)
+            {
+                var collapsedGlobePos = new Vector3(-0.24f, 0.01f, 0f);
+                var expandedGlobePos = new Vector3(-0.69f, 0.01f, 0f);
+                _globeHost.localPosition = Vector3.Lerp(collapsedGlobePos, expandedGlobePos, s);
+            }
         }
 
         void CycleGodsEyeTilt()
@@ -451,7 +528,7 @@ namespace TakXr.UI
                 : deg >= 20f
                     ? "ANGLED DESK VIEW (38° Tilted Command Table)"
                     : "FLAT FLOOR VIEW (0° Top-Down)";
-            FlashStatus($"Earth Tilt: {modeName}\n(Hold B/Y + Thumbstick Up/Down for smooth custom tilt)");
+            FlashStatus($"Earth Tilt: {modeName}\n(2-hand pinch & lift/lower or Hold B/Y + Stick for custom tilt)");
             UpdateTiltButtonLabel();
         }
 
@@ -462,10 +539,10 @@ namespace TakXr.UI
             _dockTiltLabel.text = p <= 2 ? "Tilt: 0°" : $"Tilt: {p}°";
         }
 
-        void AddDockButton(string id, string iconName, string label, Vector3 localPos, Action onClick)
+        void AddDockButton(Transform parent, string id, string iconName, string label, Vector3 localPos, Action onClick)
         {
             var root = new GameObject("Dock_" + id).transform;
-            root.SetParent(_dockRoot, false);
+            root.SetParent(parent, false);
             root.localPosition = localPos;
 
             bool isMenu = id == "menu";
@@ -473,13 +550,13 @@ namespace TakXr.UI
                 ? new Color(0.14f, 0.38f, 0.62f, 0.96f)
                 : new Color(0.08f, 0.15f, 0.24f, 0.95f);
 
-            Quad("CellBg", root, new Vector3(0f, 0f, 0.004f), new Vector2(0.126f, 0.128f), cellColor, 2998);
-            MakeIconQuad(root, iconName, 0.068f, new Vector3(0f, 0.018f, -0.003f));
-            Text("Lbl", root, new Vector3(0f, -0.044f, -0.003f), label, 0.0029f,
+            Quad("CellBg", root, new Vector3(0f, 0f, 0.004f), new Vector2(0.122f, 0.128f), cellColor, 2998);
+            MakeIconQuad(root, iconName, 0.066f, new Vector3(0f, 0.018f, -0.003f));
+            Text("Lbl", root, new Vector3(0f, -0.044f, -0.003f), label, 0.0028f,
                 new Color(0.92f, 0.97f, 1f, 0.98f));
 
             var col = root.gameObject.AddComponent<BoxCollider>();
-            col.size = new Vector3(0.132f, 0.135f, 0.08f);
+            col.size = new Vector3(0.126f, 0.135f, 0.08f);
             col.isTrigger = true;
             _buttons.Add(new ToolBtn { Root = root, OnClick = onClick, Id = id });
         }
@@ -532,7 +609,6 @@ namespace TakXr.UI
         {
             _toolCatalog.Clear();
 
-            // Complete ATAK & VR-TAK Tool Suite — ALL 36 TOOLS ENABLED & WIRED (Zero Stubs!)
             Tool("alert", "alert", "Alert 911", () =>
             {
                 HideSidePanels();
@@ -614,9 +690,10 @@ namespace TakXr.UI
                 locomotion?.OrientNorth();
                 CycleGodsEyeTilt();
             });
-            Tool("plugins", "plugins", "Plugins", () =>
+            Tool("plugins", "plugins", "Immerse 360°", () =>
             {
-                tacticalSuite?.ShowPluginsStatus();
+                HideSidePanels();
+                tacticalSuite?.ToggleImmersiveGroundView();
             });
             Tool("quicknav", "quicknav", "Quick Nav", () =>
             {
@@ -1080,12 +1157,13 @@ namespace TakXr.UI
                 else return;
             }
 
+            ApplyQuickBarSlideLayout();
             PlaceHeadLockedChrome();
             UpdateMenuButtonVisual();
             UpdateTiltButtonLabel();
+            UpdateUserBadgeUnderHamburger();
             UpdateCompass();
             BillboardCompassText();
-            UpdateTopStatusPill();
             UpdateStatus();
             PollUiSelect();
 
@@ -1098,36 +1176,22 @@ namespace TakXr.UI
             }
         }
 
-        void UpdateTopStatusPill()
+        void UpdateUserBadgeUnderHamburger()
         {
-            if (_topStatusText == null || Time.unscaledTime < _nextTopPillUpdate) return;
-            _nextTopPillUpdate = Time.unscaledTime + 0.5f;
+            if (_userBadgeText == null || Time.unscaledTime < _nextUserBadgeUpdate) return;
+            _nextUserBadgeUpdate = Time.unscaledTime + 0.5f;
 
             bool connected = (direct != null && direct.IsConnected) || _takConnected;
-            int totalTracks = feed != null ? feed.Cots.Count : 0;
-            int shown3D = cotLayer != null ? cotLayer.VisibleMarkerCount : 0;
             string cs = TakIdentity.Callsign;
             string team = TakIdentity.Team;
+            _userBadgeText.text = $"{cs} [{team}]";
 
-            string activeTool = "";
-            if (drawTool != null && drawTool.ActiveMode != XrDrawTool.Mode.None)
-                activeTool = $"  ·  [DRAW: {drawTool.ActiveMode}]";
-            else if (tacticalSuite != null && tacticalSuite.ActiveMode != XrTacticalToolsSuite.ToolMode.None)
-                activeTool = $"  ·  [TOOL: {tacticalSuite.ActiveMode}]";
-            else if (tacticalSuite != null && tacticalSuite.IsTabletopActive)
-                activeTool = "  ·  [3D TABLETOP]";
-            else if (world != null && Mathf.Abs(world.WorldPitchDeg) >= 5f)
-                activeTool = $"  ·  [TILT {Mathf.RoundToInt(world.WorldPitchDeg)}°]";
-
-            string netStr = connected ? "TAK ONLINE" : (direct != null ? direct.State.ToUpperInvariant() : "LOCAL");
-            _topStatusText.text = $"{cs} [{team}]  ·  {netStr}  ·  3D CoTs: {shown3D}/{totalTracks}{activeTool}";
-
-            if (_topLedRend != null)
+            if (_userLedRend != null)
             {
                 Color ledCol = connected
                     ? new Color(0.18f, 0.96f, 0.48f, 1f)
                     : new Color(1f, 0.72f, 0.15f, 1f);
-                _topLedRend.sharedMaterial = Cot3dModelFactory.GetLitMaterial(ledCol, 0.8f);
+                _userLedRend.sharedMaterial = Cot3dModelFactory.GetLitMaterial(ledCol, 0.8f);
             }
         }
 
@@ -1167,7 +1231,7 @@ namespace TakXr.UI
             // Spatial Bottom Dock: sits comfortably in lower FOV at 1.55m
             if (_dockRoot != null)
             {
-                _dockRoot.position = camPos + cameraTransform.TransformDirection(new Vector3(0f, -0.36f, 1.55f));
+                _dockRoot.position = camPos + cameraTransform.TransformDirection(new Vector3(0f, -0.35f, 1.55f));
                 _dockRoot.rotation = XrUiFacing.RotationFacingUser(_dockRoot.position, camPos);
             }
 
@@ -1175,22 +1239,21 @@ namespace TakXr.UI
             // menus/panels attach to the dock and never collide with or hide underneath it.
             if (_trayAnchor != null)
             {
-                _trayAnchor.position = camPos + cameraTransform.TransformDirection(new Vector3(0.04f, 0.16f, 1.55f));
+                _trayAnchor.position = camPos + cameraTransform.TransformDirection(new Vector3(0.04f, 0.17f, 1.55f));
                 _trayAnchor.rotation = XrUiFacing.RotationFacingUser(_trayAnchor.position, camPos);
             }
 
-            // Right Wing of Dock: 3D North Compass Rose
+            // Center Compass (#1):
+            // - When the quick toolbar is collapsed (s = 0), sits in the middle at y = -0.32f (#1)
+            //   with the 3D World Globe just to its left.
+            // - When the quick toolbar slides out to the left (s = 1), pushes the Compass (and the
+            //   telemetry block underneath it) down below the toolbar to y = -0.49f!
             if (_compassRoot != null)
             {
-                _compassRoot.position = camPos + cameraTransform.TransformDirection(new Vector3(0.56f, -0.30f, 1.32f));
+                float s = Mathf.SmoothStep(0f, 1f, _quickSlideT);
+                float compassY = Mathf.Lerp(-0.32f, -0.49f, s);
+                _compassRoot.position = camPos + cameraTransform.TransformDirection(new Vector3(0.0f, compassY, 1.46f));
                 _compassRoot.rotation = yawOnly;
-            }
-
-            // Top Status & Telemetry Pill
-            if (_topStatusPill != null)
-            {
-                _topStatusPill.position = camPos + cameraTransform.TransformDirection(new Vector3(0f, 0.42f, 1.85f));
-                _topStatusPill.rotation = XrUiFacing.RotationFacingUser(_topStatusPill.position, camPos);
             }
 
             // All Tools Drawer (anchored in the integrated dock tray)
@@ -1204,7 +1267,7 @@ namespace TakXr.UI
             if (_statusLabel != null && _statusLabel.gameObject.activeSelf)
             {
                 var st = _statusLabel.transform;
-                st.position = camPos + cameraTransform.TransformDirection(new Vector3(0f, 0.31f, 1.65f));
+                st.position = camPos + cameraTransform.TransformDirection(new Vector3(0f, 0.30f, 1.65f));
                 XrUiFacing.FaceUser(st, cameraTransform);
             }
         }
@@ -1241,13 +1304,26 @@ namespace TakXr.UI
             int h = ((Mathf.RoundToInt(headingDeg) % 360) + 360) % 360;
             string cardinal = Cardinals16[Mathf.RoundToInt(h / 22.5f) % 16];
             string tiltStr = worldTilt > 0 ? $"+{worldTilt}" : $"{worldTilt}";
-            string line1 = $"HDG {h:000}° {cardinal}  EARTH {tiltStr}°";
-            string line2 = $"{lat:F5}  {lon:F5}  ALT {Mathf.RoundToInt(altM)} m";
-            string key = line1 + "|" + line2;
+
+            bool connected = (direct != null && direct.IsConnected) || _takConnected;
+            int totalTracks = feed != null ? feed.Cots.Count : 0;
+            int shown3D = cotLayer != null ? cotLayer.VisibleMarkerCount : 0;
+            string netStr = connected ? "TAK ONLINE" : (direct != null ? direct.State.ToUpperInvariant() : "LOCAL");
+            string activeTool = "";
+            if (drawTool != null && drawTool.ActiveMode != XrDrawTool.Mode.None)
+                activeTool = $" · DRAW:{drawTool.ActiveMode}";
+            else if (tacticalSuite != null && tacticalSuite.ActiveMode != XrTacticalToolsSuite.ToolMode.None)
+                activeTool = $" · {tacticalSuite.ActiveMode}";
+
+            string line1 = $"HDG {h:000}° {cardinal}  ·  EARTH {tiltStr}°";
+            string line2 = $"{lat:F5}  {lon:F5}  ·  ALT {Mathf.RoundToInt(altM)} m";
+            string line3 = $"{netStr}  ·  CoTs {shown3D}/{totalTracks}{activeTool}";
+            string key = line1 + "|" + line2 + "|" + line3;
             if (key == _lastTelem) return;
             _lastTelem = key;
             if (_telemHdg != null) _telemHdg.text = line1;
             if (_telemGeo != null) _telemGeo.text = line2;
+            if (_telemTak != null) _telemTak.text = line3;
         }
 
         void ApproximateViewerGeo(out double lat, out double lon, out float altM)

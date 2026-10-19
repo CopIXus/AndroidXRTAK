@@ -181,7 +181,7 @@ namespace TakXr.UI
                     RebuildUi();
                 });
 
-            // Row 3: Import / Server Packages / 3D Demo Formation
+            // Row 3: Import / Server Packages / Server Channels
             y -= 0.062f;
             AddButton("ImportBtn", new Vector3(-0.34f, y, -0.01f), new Vector2(0.31f, 0.048f),
                 "Import .cot / .kml", true, ImportLocalFiles);
@@ -189,10 +189,14 @@ namespace TakXr.UI
                 "Marti Data Packages", false, () =>
                 {
                     Hide();
-                    _packagePanel?.Toggle(_cam);
+                    _packagePanel?.Open(XrLayersPanel.Tab.Packages, _cam);
                 });
-            AddButton("Demo3D", new Vector3(0.34f, y, -0.01f), new Vector2(0.31f, 0.048f),
-                _demoSpawned ? "Clear 3D Demo" : "Spawn 3D Demo", _demoSpawned, ToggleDemoFormation);
+            AddButton("MartiCh", new Vector3(0.34f, y, -0.01f), new Vector2(0.31f, 0.048f),
+                "Marti Channels", false, () =>
+                {
+                    Hide();
+                    _packagePanel?.Open(XrLayersPanel.Tab.Channels, _cam);
+                });
 
             // Entity List
             y -= 0.055f;

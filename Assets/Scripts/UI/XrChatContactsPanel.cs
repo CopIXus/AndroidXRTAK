@@ -223,7 +223,7 @@ namespace TakXr.UI
             if (list.Count == 0)
             {
                 Text("Empty", _contentRoot, new Vector3(0f, -0.02f, -0.01f),
-                    "No active team or unit contacts in feed yet.\nConnect to a TAK server or spawn demo units in Overlays.",
+                    "No active team or unit contacts in feed yet.\nConnect to a TAK server in Servers to receive live team positions.",
                     0.0075f, new Color(0.75f, 0.85f, 0.95f, 0.85f));
                 return;
             }

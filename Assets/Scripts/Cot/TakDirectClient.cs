@@ -49,7 +49,6 @@ namespace TakXr.Cot
         string _lastError;
         volatile bool _everConnected;
         int _consecutiveFailures;
-        bool _autoEnrollAttempted;
         string _selfUid = "takxr-user";
         string _selfCallsign = "XR-USER";
         string _selfTeam = "Cyan";
@@ -195,42 +194,9 @@ namespace TakXr.Cot
 
             if (gen != _bootGeneration) yield break;
 
-            // If no valid client cert yet, but the server entry has enrollment credentials
-            // (e.g. from QR scan or manual entry), automatically enroll right now.
-            if ((loaded == null || loaded.Certificate == null) &&
-                !_autoEnrollAttempted &&
-                entry != null &&
-                !string.IsNullOrWhiteSpace(entry.host) &&
-                !string.IsNullOrWhiteSpace(entry.username) &&
-                !string.IsNullOrEmpty(entry.password))
-            {
-                _autoEnrollAttempted = true;
-                int enrollPort = entry.enrollPort > 0 ? entry.enrollPort : 8446;
-                TakConnectionLog.Info(serverId, entry.host,
-                    $"Auto-enrolling {entry.username} on {entry.host}:{enrollPort}…");
-                bool enrollOk = false;
-                string enrollErr = null;
-                yield return TakEnrollmentClient.Enroll(
-                    serverId, entry.host, enrollPort, entry.username, entry.password,
-                    (ok, msg) => { enrollOk = ok; enrollErr = msg; });
-                if (gen != _bootGeneration) yield break;
-                if (enrollOk)
-                {
-                    entry.certNote = "enrolled";
-                    TakServerDirectory.UpdateEntry(dir, entry);
-                    loaded = null;
-                    yield return TakCertStore.LoadRoutine(_config, serverId, mat => loaded = mat);
-                    if (gen != _bootGeneration) yield break;
-                }
-                else if (!string.IsNullOrEmpty(enrollErr))
-                {
-                    _state = "error";
-                    _lastError = enrollErr;
-                    TakConnectionLog.Error(serverId, BoundHost ?? "?", _lastError);
-                    yield break;
-                }
-            }
-
+            // Enrollment is started from the Servers panel (QR / Enroll / Done) so the
+            // user sees a live scrolling log. Do not auto-enroll here — concurrent
+            // Boot retries were burning one-time QR tokens while signClient/v2 ran.
             if (loaded == null || loaded.Certificate == null)
             {
                 _state = loaded != null && !string.IsNullOrEmpty(loaded.Error) &&

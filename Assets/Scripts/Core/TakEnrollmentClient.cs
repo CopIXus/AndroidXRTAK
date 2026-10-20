@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
@@ -19,31 +20,27 @@ using Org.BouncyCastle.Pkcs;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.X509;
 using UnityEngine;
-using UnityEngine.Networking;
+using Debug = UnityEngine.Debug;
 
 namespace TakXr.Core
 {
     /// <summary>
-    /// On-device TAK Server quick-enroll. Same flow as the sibling backend
-    /// (takEnrollment.ts) and ATAK/WinTAK/iTAK username+password enrollment:
-    /// read the server DN template, POST a CSR to signClient/v2, store the
-    /// signed client certificate for the CoT stream.
+    /// On-device TAK Server quick-enroll. Same flow as ATAK / TAK_Beacon:
+    /// GET /Marti/api/tls/config, POST PEM CSR to signClient/v2, store a
+    /// Mono-readable DER PKCS#12 for the CoT stream.
     /// </summary>
     public static class TakEnrollmentClient
     {
-        const int ConnectTimeoutMs = 15_000;
-        const int TlsTimeoutMs = 20_000;
-        const int ReadTimeoutMs = 20_000;
-        /// <summary>TAK Server often holds the sign connection for over a minute before it closes.</summary>
-        const int SignTimeoutMs = 180_000;
+        const int ConnectTimeoutMs = 10_000;
+        const int TlsTimeoutMs = 15_000;
+        const int ReadTimeoutMs = 15_000;
+        /// <summary>Android OkHttp path (TAK_Beacon) usually finishes in a few seconds.</summary>
+        const int AndroidSignTimeoutMs = 45_000;
+        /// <summary>Mono SslStream fallback — may stall on keep-alive until the server closes.</summary>
+        const int SignTimeoutMs = 90_000;
         static int _busy;
         /// <summary>Local PKCS#12 password. The TAK username/password is never used as the file password.</summary>
         public const string LocalP12Password = "takxr-enroll";
-
-        sealed class TrustAllCertHandler : CertificateHandler
-        {
-            protected override bool ValidateCertificate(byte[] certificateData) => true;
-        }
 
         class SubjectExtras
         {
@@ -58,6 +55,7 @@ namespace TakXr.Core
         {
             public int Status;
             public string Body;
+            public int ElapsedMs;
         }
 
         class Work
@@ -71,9 +69,8 @@ namespace TakXr.Core
 
         /// <summary>
         /// Enroll <paramref name="username"/> and store the client cert on <paramref name="serverId"/>.
-        /// Uses UnityWebRequest (native HTTPS) for TAK Server /Marti/api/tls/config and
-        /// /Marti/api/tls/signClient/v2 (matching TAK_Beacon's EnrollmentClient.kt), with
-        /// BouncyCastle RSA-2048 CSR + definite-length DER PKCS#12 on a background thread.
+        /// Uses a raw TLS socket (UnityWebRequest hangs on slow signClient/v2 on Android XR)
+        /// with BouncyCastle RSA-2048 PEM CSR + definite-length DER PKCS#12.
         /// </summary>
         public static IEnumerator Enroll(
             string serverId, string host, int enrollPort, string username, string password,
@@ -100,185 +97,88 @@ namespace TakXr.Core
             TakConnectionLog.EnsureFile();
             string logHost = host.Trim();
             string cleanUser = username.Trim();
-            string basicAuth = Convert.ToBase64String(Encoding.UTF8.GetBytes(cleanUser + ":" + password));
+            string cleanPass = password;
 
-            // 1. GET /Marti/api/tls/config
-            Note(logHost, $"GET tls/config {logHost}:{enrollPort} user={cleanUser}");
-            int cfgStatus = 0;
-            string cfgBody = null;
-            string cfgUrl = $"https://{logHost}:{enrollPort}/Marti/api/tls/config";
-            using (var cfgReq = UnityWebRequest.Get(cfgUrl))
-            {
-                cfgReq.certificateHandler = new TrustAllCertHandler();
-                cfgReq.disposeCertificateHandlerOnDispose = true;
-                cfgReq.timeout = 15;
-                cfgReq.SetRequestHeader("Authorization", "Basic " + basicAuth);
-                cfgReq.SetRequestHeader("Accept", "application/xml");
-                yield return cfgReq.SendWebRequest();
-                cfgStatus = (int)cfgReq.responseCode;
-                cfgBody = cfgReq.downloadHandler != null ? cfgReq.downloadHandler.text : null;
-                if (cfgStatus <= 0 && cfgReq.result != UnityWebRequest.Result.Success)
-                {
-                    Note(logHost, "config UnityWebRequest fallback: " + cfgReq.error);
-                }
-            }
-
-            if (cfgStatus == 401 || cfgStatus == 403)
-            {
-                string msg = "Enrollment rejected — check username and password (or scan a fresh QR code)";
-                TakConnectionLog.Error("enroll", logHost, msg);
-                Interlocked.Exchange(ref _busy, 0);
-                onDone?.Invoke(false, msg);
-                yield break;
-            }
-
-            SubjectExtras extras = null;
-            if (cfgStatus >= 200 && cfgStatus < 300)
-            {
-                Note(logHost, "config HTTP " + cfgStatus);
-                extras = ParseSubject(cfgBody);
-            }
-
-            // 2. Generate 2048-bit RSA keypair + CSR on background thread (and fallback GET if needed).
-            AsymmetricCipherKeyPair keys = null;
-            string csrBase64 = null;
-            string prepErr = null;
-            bool prepDone = false;
-            var prepThread = new Thread(() =>
+            // Prefer Android HttpsURLConnection (TAK_Beacon stack). Mono SslStream often
+            // holds signClient/v2 until the server closes keep-alive (~60–120s) even after
+            // the JSON body is ready; Android returns in a few seconds on the same server.
+            Note(logHost, $"Enroll start {cleanUser} @ {logHost}:{enrollPort}");
+            var work = new Work { Step = "probe" };
+            var enrollThread = new Thread(() =>
             {
                 try
                 {
-                    if (extras == null)
-                    {
-                        var cfg = Request(
-                            logHost, enrollPort, "GET", "/Marti/api/tls/config",
-                            null, null, "application/xml", cleanUser, password);
-                        Note(logHost, "config(tcp) HTTP " + cfg.Status);
-                        if (cfg.Status == 401 || cfg.Status == 403)
-                            throw new IOException("Enrollment rejected — check username and password (or scan a fresh QR code)");
-                        extras = cfg.Status >= 200 && cfg.Status < 300
-                            ? ParseSubject(cfg.Body)
-                            : new SubjectExtras();
-                    }
+                    work.Step = "probe";
+                    ProbeReachability(logHost, enrollPort);
+
+                    bool useAndroid = TakAndroidHttps.IsAvailable;
+                    Note(logHost, useAndroid
+                        ? "HTTP stack: Android HttpsURLConnection (TAK_Beacon)"
+                        : "HTTP stack: Mono SslStream fallback");
+
+                    work.Step = "config";
+                    Note(logHost, $"GET /Marti/api/tls/config on :{enrollPort} user={cleanUser}");
+                    var cfg = Http(
+                        useAndroid, logHost, enrollPort, "GET", "/Marti/api/tls/config",
+                        null, null, "application/xml", cleanUser, cleanPass, ReadTimeoutMs);
+                    Note(logHost, "config HTTP " + cfg.Status + " in " + cfg.ElapsedMs + "ms");
+                    if (cfg.Status == 401 || cfg.Status == 403)
+                        throw new IOException("Enrollment rejected — check username and password (or scan a fresh QR code)");
+                    if (cfg.Status < 200 || cfg.Status >= 300)
+                        throw new IOException("Enrollment config failed (HTTP " + cfg.Status + ")");
+                    SubjectExtras extras = ParseSubject(cfg.Body) ?? new SubjectExtras();
+
+                    work.Step = "csr";
                     var random = new SecureRandom();
                     var gen = new RsaKeyPairGenerator();
                     gen.Init(new KeyGenerationParameters(random, 2048));
-                    keys = gen.GenerateKeyPair();
+                    AsymmetricCipherKeyPair keys = gen.GenerateKeyPair();
                     var subject = BuildSubject(cleanUser, extras);
                     Note(logHost, "CSR " + subject);
                     var csr = new Pkcs10CertificationRequest(
                         "SHA256WITHRSA", subject, keys.Public, new DerSet(), keys.Private);
-                    // Raw base64 without PEM headers or line breaks, matching TAK_Beacon EnrollmentClient.kt.
-                    csrBase64 = Convert.ToBase64String(csr.GetEncoded());
-                }
-                catch (Exception ex)
-                {
-                    prepErr = "csr: " + Clean(ex);
-                    TakConnectionLog.Error("enroll", logHost, prepErr);
-                    Debug.LogError("[TakEnroll] " + prepErr + "\n" + ex);
-                }
-                finally
-                {
-                    prepDone = true;
-                }
-            })
-            { IsBackground = true, Name = "TakEnroll-CSR" };
-            prepThread.Start();
-            while (!prepDone)
-                yield return null;
+                    // PEM CSR body — same as TAK_Beacon EnrollmentClient.kt.
+                    byte[] csrBytes = Encoding.UTF8.GetBytes(Pem("CERTIFICATE REQUEST", csr.GetEncoded()));
+                    Note(logHost, "CSR PEM " + csrBytes.Length + " bytes");
 
-            if (prepErr != null || keys == null || string.IsNullOrEmpty(csrBase64))
-            {
-                Interlocked.Exchange(ref _busy, 0);
-                onDone?.Invoke(false, prepErr ?? "CSR generation failed");
-                yield break;
-            }
-
-            // 3. POST /Marti/api/tls/signClient/v2?clientUid=<user>&version=v2
-            // TAK Server often holds this connection 1–2 minutes while signing.
-            // A short UnityWebRequest timeout aborts after the CSR was already accepted,
-            // consumes one-time QR tokens, then a retry gets HTTP 401.
-            string signPath = "/Marti/api/tls/signClient/v2?clientUid=" +
-                              Uri.EscapeDataString(cleanUser) + "&version=v2";
-            string signUrl = $"https://{logHost}:{enrollPort}{signPath}";
-            Note(logHost, "POST " + signPath + " (waiting up to " + (SignTimeoutMs / 1000) + "s for signed cert)");
-            int signStatus = 0;
-            string signBody = null;
-            string signTransportError = null;
-            byte[] csrBytes = Encoding.UTF8.GetBytes(csrBase64);
-            using (var postReq = new UnityWebRequest(signUrl, UnityWebRequest.kHttpVerbPOST))
-            {
-                postReq.uploadHandler = new UploadHandlerRaw(csrBytes)
-                {
-                    contentType = "text/plain; charset=utf-8",
-                };
-                postReq.downloadHandler = new DownloadHandlerBuffer();
-                postReq.certificateHandler = new TrustAllCertHandler();
-                postReq.disposeCertificateHandlerOnDispose = true;
-                postReq.timeout = SignTimeoutMs / 1000; // seconds
-                postReq.SetRequestHeader("Authorization", "Basic " + basicAuth);
-                postReq.SetRequestHeader("Accept", "application/json");
-                postReq.SetRequestHeader("Content-Type", "text/plain; charset=utf-8");
-                yield return postReq.SendWebRequest();
-                signStatus = (int)postReq.responseCode;
-                signBody = postReq.downloadHandler != null ? postReq.downloadHandler.text : null;
-                if (signStatus <= 0 && postReq.result != UnityWebRequest.Result.Success)
-                {
-                    signTransportError = postReq.error ?? postReq.result.ToString();
-                    Note(logHost, "sign UnityWebRequest: " + signTransportError);
-                }
-            }
-
-            // 4. Package DER PKCS#12 on background thread.
-            // Only fall back to a raw TLS socket when Unity never opened the POST
-            // (DNS/connect/SSL). Never re-POST after a timeout — that burns QR tokens.
-            var work = new Work { Step = "pfx" };
-            var pfxThread = new Thread(() =>
-            {
-                try
-                {
-                    bool canSocketFallback = signStatus <= 0 &&
-                        !string.IsNullOrEmpty(signTransportError) &&
-                        LooksLikePreSendFailure(signTransportError);
-                    if (signStatus <= 0 && canSocketFallback)
+                    work.Step = "sign";
+                    string signPath = "/Marti/api/tls/signClient/v2?clientUid=" +
+                                      Uri.EscapeDataString(cleanUser) + "&version=v2";
+                    int signBudget = useAndroid ? AndroidSignTimeoutMs : SignTimeoutMs;
+                    Note(logHost, "POST " + signPath + " (expect seconds; budget " + (signBudget / 1000) + "s)");
+                    var heartbeat = new Thread(() =>
                     {
-                        work.Step = "sign";
-                        Note(logHost, "sign socket fallback after pre-send failure");
-                        var signed = Request(
-                            logHost, enrollPort, "POST", signPath, csrBytes,
-                            "text/plain; charset=utf-8", "application/json", cleanUser, password);
-                        signStatus = signed.Status;
-                        signBody = signed.Body;
-                    }
-                    else if (signStatus <= 0)
-                    {
-                        throw new IOException(
-                            "Signing timed out or failed after the CSR was sent (" +
-                            (signTransportError ?? "no response") +
-                            "). Generate a fresh QR code (or re-enter password) and try again.");
-                    }
+                        int sec = 0;
+                        while (!work.Finished && sec < signBudget / 1000)
+                        {
+                            Thread.Sleep(5_000);
+                            if (work.Finished || work.Step != "sign") return;
+                            sec += 5;
+                            Note(logHost, "Signing… " + sec + "s (waiting for HTTP response)");
+                        }
+                    })
+                    { IsBackground = true, Name = "TakEnroll-Wait" };
+                    heartbeat.Start();
 
-                    Note(logHost, "sign HTTP " + signStatus + " body " +
-                                  (signBody != null ? signBody.Length : 0) + " " + Compact(signBody, 160));
+                    var signed = Http(
+                        useAndroid, logHost, enrollPort, "POST", signPath, csrBytes,
+                        "text/plain; charset=utf-8", "application/json", cleanUser, cleanPass, signBudget);
+                    Note(logHost, "sign HTTP " + signed.Status + " in " + signed.ElapsedMs + "ms body " +
+                                  (signed.Body != null ? signed.Body.Length : 0) + " " +
+                                  Compact(signed.Body, 160));
 
-                    if (signStatus == 401 || signStatus == 403)
+                    if (signed.Status == 401 || signed.Status == 403)
                         throw new IOException("Enrollment rejected — check username and password (or scan a fresh QR code)");
-                    if (signStatus < 200 || signStatus >= 300)
-                    {
-                        string snippet = Compact(signBody, 180);
-                        throw new IOException(
-                            $"Enrollment failed (HTTP {signStatus}). {snippet}");
-                    }
-
-                    var chain = ExtractCertChain(signBody, keys.Public);
-                    if (chain == null || chain.Count == 0)
-                        throw new IOException(
-                            "Enrollment response had no signed certificate. " + Compact(signBody, 220));
+                    if (signed.Status < 200 || signed.Status >= 300)
+                        throw new IOException("Enrollment failed (HTTP " + signed.Status + "). " + Compact(signed.Body, 180));
 
                     work.Step = "pfx";
-                    // Mono's ASN.1 reader rejects BouncyCastle's default BER indefinite-length
-                    // Pkcs12Store with "Unable to decode certificate." SetUseDerEncoding(true)
-                    // writes definite-length DER that Unity/Mono X509Certificate2 loads cleanly.
+                    var chain = ExtractCertChain(signed.Body, keys.Public);
+                    if (chain == null || chain.Count == 0)
+                        throw new IOException(
+                            "Enrollment response had no signed certificate. " + Compact(signed.Body, 220));
+
+                    // Mono rejects BouncyCastle's default BER indefinite-length PKCS#12.
                     var builder = new Pkcs12StoreBuilder();
                     builder.SetUseDerEncoding(true);
                     var store = builder.Build();
@@ -315,8 +215,8 @@ namespace TakXr.Core
                     work.Finished = true;
                 }
             })
-            { IsBackground = true, Name = "TakEnroll-PFX" };
-            pfxThread.Start();
+            { IsBackground = true, Name = "TakEnroll" };
+            enrollThread.Start();
             while (!work.Finished)
                 yield return null;
             Interlocked.Exchange(ref _busy, 0);
@@ -352,25 +252,54 @@ namespace TakXr.Core
         }
 
         /// <summary>
-        /// True when UnityWebRequest failed before the CSR body was likely accepted
-        /// by TAK Server (safe to retry over a raw TLS socket).
+        /// Log TCP reachability for enroll (8446), streaming CoT (8089), and Marti HTTPS (8443).
         /// </summary>
-        static bool LooksLikePreSendFailure(string error)
+        static void ProbeReachability(string host, int enrollPort)
         {
-            if (string.IsNullOrEmpty(error)) return false;
-            string e = error.ToLowerInvariant();
-            if (e.Contains("timeout") || e.Contains("timed out")) return false;
-            return e.Contains("cannot resolve") ||
-                   e.Contains("name resolution") ||
-                   e.Contains("could not resolve") ||
-                   e.Contains("connection refused") ||
-                   e.Contains("failed to connect") ||
-                   e.Contains("unable to connect") ||
-                   e.Contains("network is unreachable") ||
-                   e.Contains("no route to host") ||
-                   e.Contains("ssl") ||
-                   e.Contains("tls") ||
-                   e.Contains("certificate");
+            var ports = new[]
+            {
+                (enrollPort > 0 ? enrollPort : 8446, "enroll HTTPS"),
+                (8089, "CoT TLS stream"),
+                (8443, "Marti HTTPS"),
+            };
+            var seen = new HashSet<int>();
+            foreach (var (port, role) in ports)
+            {
+                if (!seen.Add(port)) continue;
+                var sw = Stopwatch.StartNew();
+                string result = TakAndroidHttps.ProbeTcp(host, port, 4_000);
+                Note(host, $"TCP :{port} ({role}) → {result} ({sw.ElapsedMilliseconds}ms)");
+            }
+        }
+
+        static HttpResult Http(
+            bool preferAndroid, string host, int port, string method, string path,
+            byte[] body, string contentType, string accept, string username, string password,
+            int readTimeoutMs)
+        {
+            string url = "https://" + host + ":" + port + path;
+            if (preferAndroid)
+            {
+                Note(host, method + " " + url + " via Android");
+                var ar = TakAndroidHttps.Request(
+                    url, method, username, password, body, contentType, accept,
+                    ConnectTimeoutMs, readTimeoutMs);
+                if (ar.Status > 0 && string.IsNullOrEmpty(ar.Error))
+                {
+                    return new HttpResult
+                    {
+                        Status = ar.Status,
+                        Body = ar.Body ?? "",
+                        ElapsedMs = ar.ElapsedMs,
+                    };
+                }
+
+                string why = string.IsNullOrEmpty(ar.Error) ? ("HTTP " + ar.Status) : ar.Error;
+                Note(host, "Android HTTPS failed (" + why + ") — falling back to Mono SslStream");
+            }
+
+            Note(host, method + " " + url + " via Mono SslStream");
+            return Request(host, port, method, path, body, contentType, accept, username, password, readTimeoutMs);
         }
 
         static X509Name BuildSubject(string cn, SubjectExtras extras)
@@ -546,31 +475,38 @@ namespace TakXr.Core
 
         static HttpResult Request(
             string host, int port, string method, string path, byte[] body, string contentType,
-            string accept, string username, string password)
+            string accept, string username, string password, int timeoutMs)
         {
+            var sw = Stopwatch.StartNew();
             var addrs = ResolvePreferIpv4(host);
+            Note(host, "DNS " + host + " → " + string.Join(", ", Array.ConvertAll(addrs, a => a.ToString())));
             Exception last = null;
             foreach (var addr in addrs)
             {
                 TcpClient tcp = null;
                 try
                 {
+                    Note(host, "TCP connect " + addr + ":" + port + "…");
                     tcp = Connect(addr, port, host);
                     tcp.NoDelay = true;
                     tcp.Client.Blocking = true;
-                    int timeoutMs = method == "POST" ? SignTimeoutMs : ReadTimeoutMs;
                     tcp.ReceiveTimeout = timeoutMs;
-                    tcp.SendTimeout = timeoutMs;
+                    tcp.SendTimeout = Math.Min(timeoutMs, ConnectTimeoutMs);
+                    Note(host, "TCP connected (" + sw.ElapsedMilliseconds + "ms) — TLS…");
                     using var ssl = new SslStream(tcp.GetStream(), false, (_, _, _, _) => true);
                     Authenticate(ssl, host);
+                    Note(host, "TLS ok (" + sw.ElapsedMilliseconds + "ms) — " + method + " " + path);
                     WriteRequest(ssl, host, port, method, path, body, contentType, accept, username, password);
-                    var result = ReadResponse(tcp, ssl, timeoutMs);
+                    Note(host, "Request written — reading response (budget " + (timeoutMs / 1000) + "s)…");
+                    var result = ReadResponse(tcp, ssl, timeoutMs, host);
+                    result.ElapsedMs = (int)sw.ElapsedMilliseconds;
                     tcp.Close();
                     return result;
                 }
                 catch (Exception ex)
                 {
                     last = ex;
+                    Note(host, method + " " + addr + ":" + port + " failed: " + Clean(ex));
                     Debug.LogWarning($"[TakEnroll] {method} {addr}:{port} {ex.Message}");
                     try { tcp?.Close(); } catch { /* ignore */ }
                 }
@@ -669,13 +605,14 @@ namespace TakXr.Core
             return ipv4.Length > 0 ? ipv4 : all;
         }
 
-        static HttpResult ReadResponse(TcpClient tcp, Stream stream, int timeoutMs)
+        static HttpResult ReadResponse(TcpClient tcp, Stream stream, int timeoutMs, string host)
         {
             using var ms = new MemoryStream();
             var buf = new byte[16 * 1024];
-            int waited = 0;
-            bool shortenedTimeout = false;
-            while (waited < timeoutMs)
+            int start = Environment.TickCount;
+            bool haveHeaders = false;
+            bool loggedFirst = false;
+            while (unchecked(Environment.TickCount - start) < timeoutMs)
             {
                 int n;
                 try
@@ -684,21 +621,36 @@ namespace TakXr.Core
                 }
                 catch (IOException ex) when (ms.Length > 0 && IsTimeout(ex))
                 {
+                    Note(host, "Read timeout after " + ms.Length + " bytes — parsing what we have");
                     break;
                 }
-                if (n <= 0) break;
+                if (n <= 0)
+                {
+                    Note(host, "Server closed after " + ms.Length + " bytes");
+                    break;
+                }
+                if (!loggedFirst)
+                {
+                    loggedFirst = true;
+                    Note(host, "First response byte after " +
+                               unchecked(Environment.TickCount - start) + "ms");
+                }
                 ms.Write(buf, 0, n);
                 byte[] snapshot = ms.ToArray();
                 if (TryParseHttp(snapshot, true, out var partial))
-                    return partial;
-                if (!shortenedTimeout && IndexOf(snapshot, "\r\n\r\n") >= 0)
                 {
-                    // Once headers arrive, don't let a keep-alive server stall for 3 minutes
-                    // if it omitted Content-Length.
-                    shortenedTimeout = true;
-                    try { tcp.ReceiveTimeout = 4000; } catch { /* ignore */ }
+                    Note(host, "Complete HTTP body (" + ms.Length + " bytes)");
+                    return partial;
                 }
-                waited += 1;
+                if (!haveHeaders && IndexOf(snapshot, "\r\n\r\n") >= 0)
+                {
+                    haveHeaders = true;
+                    Note(host, "HTTP headers received (" + ms.Length + " bytes so far)");
+                    // Keep reading for the remaining overall budget; do not clamp to 4s —
+                    // signClient/v2 often streams the JSON body slowly after headers.
+                    int remaining = Math.Max(5_000, timeoutMs - unchecked(Environment.TickCount - start));
+                    try { tcp.ReceiveTimeout = remaining; } catch { /* ignore */ }
+                }
             }
             if (ms.Length == 0)
                 throw new TimeoutException("Enrollment response timed out");

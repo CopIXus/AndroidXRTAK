@@ -17,10 +17,8 @@ namespace TakXr.UI
     ///   1. Right Pod (always visible): `<` / `>` Slide Toggle button + Hamburger (`All Tools` in the
     ///      rightmost slot with distinct accent border), and operator Callsign/Team badge directly underneath.
     ///   2. Sliding Curved Quick-Action Bar (`_quickBarRoot`):
-    ///      Clicking `<` slides the curved quick-action bar out to the left, pushing the 3D World Globe
-    ///      to the left and pushing the Center Compass down below the bar.
-    ///      Clicking `>` slides the quick bar back in, pulling the 3D World Globe back to the left of
-    ///      the compass and pulling the Compass back up to the center (#1).
+    ///      Clicking `<` slides the curved quick-action bar out to the left and pushes the Center
+    ///      Compass down below the bar. Clicking `>` slides the bar back in and restores the compass.
     ///   3. Center Compass (#1) + Crisp Drop-Shadowed Telemetry (no dark background box!):
     ///      High-legibility shadowed text directly under the compass.
     ///   4. Re-clicking any active button or Hamburger toggles its panel/tool closed cleanly
@@ -85,7 +83,6 @@ namespace TakXr.UI
         Transform _dockFullPlate;
         Transform _dockCompactPlate;
         Transform _quickBarRoot;
-        Transform _globeHost;
         Transform _slideArrowBtn;
         TextMesh _slideArrowGlyph;
         TextMesh _slideArrowSub;
@@ -97,7 +94,6 @@ namespace TakXr.UI
 
         Transform _trayAnchor;
         TextMesh _dockTiltLabel;
-        XrMiniWorldGlobe _miniGlobe;
 
         Transform _menuRoot;
         Transform _menuPageRoot;
@@ -209,7 +205,7 @@ namespace TakXr.UI
             BuildSpatialDock();
             BuildStatus();
             _statusHideAt = Time.unscaledTime + 4.5f;
-            FlashStatus("TAKXR Ready · Tap < to slide out curved dock or ☰ for All Tools");
+            FlashStatus("XRTAK Ready · Tap < to slide out curved dock or ☰ for All Tools");
         }
 
         void OnDestroy()
@@ -290,24 +286,6 @@ namespace TakXr.UI
             XrCurvedWidgets.EvaluateArc(0.490f, DockHalfSpan, DockArchY, DockWrapZ, out var compactOff, out var compactRot);
             _dockCompactPlate.localPosition = compactOff + new Vector3(0f, 0f, 0.008f);
             _dockCompactPlate.localRotation = compactRot;
-
-            // 3D World Globe: sits to the left of the center compass when collapsed,
-            // and slides left when the quick toolbar expands out.
-            _globeHost = new GameObject("GlobeWidgetHost").transform;
-            _globeHost.SetParent(_dockRoot, false);
-            _globeHost.localPosition = new Vector3(-0.26f, 0.01f, -0.02f);
-            _miniGlobe = _globeHost.gameObject.AddComponent<XrMiniWorldGlobe>();
-            _miniGlobe.Configure(config, feed, cameraTransform);
-
-            var globeCol = _globeHost.gameObject.AddComponent<BoxCollider>();
-            globeCol.size = new Vector3(0.18f, 0.18f, 0.18f);
-            globeCol.isTrigger = true;
-            _buttons.Add(new ToolBtn
-            {
-                Root = _globeHost,
-                Id = "dock_globe3d",
-                OnClick = () => _miniGlobe.CycleGlobeMode(FlashStatus),
-            });
 
             // 1. Hamburger ("ALL TOOLS") button in the rightmost slot (where SOS 911 is in the reference image)
             AddCurvedDockButton(_dockRoot, "menu", "hamburger", "ALL TOOLS", 0.548f, isHamburgerSlot: true, onClick: () =>
@@ -494,14 +472,6 @@ namespace TakXr.UI
             if (_dockCompactPlate != null && _dockCompactPlate.gameObject.activeSelf == showFull)
                 _dockCompactPlate.gameObject.SetActive(!showFull);
 
-            // 3. Push the 3D World Globe to the left when the toolbar slides out,
-            //    and pull it back to the left of the center Compass (#1) when collapsed!
-            if (_globeHost != null)
-            {
-                var collapsedGlobePos = new Vector3(-0.26f, 0.01f, -0.02f);
-                var expandedGlobePos = new Vector3(-0.71f, -0.01f, -0.06f);
-                _globeHost.localPosition = Vector3.Lerp(collapsedGlobePos, expandedGlobePos, s);
-            }
         }
 
         void CycleGodsEyeTilt()
@@ -1232,10 +1202,8 @@ namespace TakXr.UI
             }
 
             // Center Compass (#1):
-            // - When the quick toolbar is collapsed (s = 0), sits in the middle at y = -0.31f (#1)
-            //   with the 3D World Globe just to its left.
-            // - When the quick toolbar slides out to the left (s = 1), pushes the Compass (and the
-            //   crisp shadowed telemetry underneath it) down below the toolbar to y = -0.49f!
+            // - Collapsed: middle at y = -0.31f
+            // - Quick bar expanded: pushed down to y = -0.49f
             if (_compassRoot != null)
             {
                 float s = Mathf.SmoothStep(0f, 1f, _quickSlideT);

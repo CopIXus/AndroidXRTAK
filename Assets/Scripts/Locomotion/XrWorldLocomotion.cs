@@ -5,23 +5,23 @@ using UnityEngine;
 namespace TakXr.Locomotion
 {
     /// <summary>
-    /// Google Maps XR-style fluid locomotion (works identically with bare hands+eyes OR controllers):
-    /// 1. Single-Hand Pinch / Trigger Grab-and-Pull:
-    ///    - Locks onto the terrain point you are looking/pointing at and pulls the Earth
-    ///      with your hand + ray motion (with smooth release momentum/inertia like Google Maps).
-    /// 2. Two-Hand Pinch / Trigger Manipulation:
-    ///    - Pull hands apart / push together to Zoom / Scale about the focus point in front of you.
-    ///    - Twist hands horizontally like a steering wheel to Rotate the map around its surface normal.
-    ///    - Lift / lower both hands together to smoothly Tilt the Earth up in front of you (0° to 62° Wall View)
-    ///      without needing any controller buttons!
-    /// 3. Physical Controller Thumbsticks (when controllers are held):
-    ///    - Left stick glides along the tilted map surface plane; Right stick zooms &amp; yaws; B/Y + stick tilts.
+    /// Google Maps Immersive View locomotion (Android XR help: pinch-drag to pan,
+    /// two-hand spread to zoom, two-hand twist to rotate):
+    /// 1. Single-Hand Pinch — ray-anchored grab. The map point under your aim sticks
+    ///    1:1 to the ray (pull the world toward you). Short soft coast on release.
+    /// 2. Two-Hand Pinch — spread/pinch to zoom about the focus in front of you;
+    ///    steering-wheel twist to rotate; gentle dual-hand lift to tilt.
+    /// 3. Controllers — left stick pans the map plane; right stick zooms/yaws; B/Y+stick tilts.
     /// </summary>
     public class XrWorldLocomotion : MonoBehaviour
     {
-        const float DragThresholdM = 0.0025f;
-        const float StickDeadzone = 0.12f;
-        const float InertiaDamping = 6.5f;
+        const float DragThresholdM = 0.004f;
+        const float StickDeadzone = 0.15f;
+        /// <summary>Maps-like short coast — was 6.5 and felt like a rocket after release.</summary>
+        const float InertiaDamping = 14f;
+        const float InertiaMaxSpeed = 45f;
+        /// <summary>Ignore sub-millimeter hand jitter before starting a pan.</summary>
+        const float GrabSettleM = 0.008f;
 
         static readonly float[] TiltPresetDegs = { 0f, 38f, 62f };
 
@@ -33,8 +33,9 @@ namespace TakXr.Locomotion
         {
             public bool grabbing;
             public Vector3 lastPos;
-            public Vector3 lastRayHit;
-            public bool hasRayHit;
+            /// <summary>Grabbed map point in world-root local space (Maps-style anchor).</summary>
+            public Vector3 grabLocal;
+            public bool hasGrab;
             public float moved;
         }
 
@@ -94,15 +95,21 @@ namespace TakXr.Locomotion
         bool UpdateInertia()
         {
             if (_grabs[0].grabbing || _grabs[1].grabbing) return false;
-            if (_panVelocity.sqrMagnitude < 0.04f)
+            if (_panVelocity.sqrMagnitude < 0.01f)
             {
                 _panVelocity = Vector3.zero;
                 return false;
             }
             var mapUp = world.Root.up;
             _panVelocity = Vector3.ProjectOnPlane(_panVelocity, mapUp);
+            if (_panVelocity.magnitude > InertiaMaxSpeed)
+                _panVelocity = _panVelocity.normalized * InertiaMaxSpeed;
             world.Root.position += _panVelocity * Time.deltaTime;
-            _panVelocity = Vector3.Lerp(_panVelocity, Vector3.zero, Mathf.Clamp01(InertiaDamping * Time.deltaTime));
+            // Exponential decay — short Maps-like coast, not a long slide.
+            float damp = Mathf.Exp(-InertiaDamping * Time.deltaTime);
+            _panVelocity *= damp;
+            if (_panVelocity.sqrMagnitude < 0.01f)
+                _panVelocity = Vector3.zero;
             return true;
         }
 
@@ -206,7 +213,13 @@ namespace TakXr.Locomotion
                         g.grabbing = true;
                         g.moved = 0f;
                         g.lastPos = pos;
-                        g.hasRayHit = TryIntersectMapPlane(i, out g.lastRayHit);
+                        g.hasGrab = false;
+                        // Maps: lock the map point under the aim ray (or hand projection).
+                        if (TryIntersectMapPlane(i, out var hit))
+                        {
+                            g.grabLocal = world.Root.InverseTransformPoint(hit);
+                            g.hasGrab = true;
+                        }
                         _panVelocity = Vector3.zero;
                     }
                     active.Add(i);
@@ -215,12 +228,11 @@ namespace TakXr.Locomotion
                 else if (g.grabbing)
                 {
                     g.grabbing = false;
-                    g.hasRayHit = false;
+                    g.hasGrab = false;
                     _twoHand = false;
                 }
             }
 
-            float gain = PanGain();
             var mapUp = world.Root.up;
 
             if (active.Count == 1)
@@ -233,33 +245,43 @@ namespace TakXr.Locomotion
                 g.moved += handDelta.magnitude;
                 g.lastPos = pos;
 
-                // Combine direct 3D hand translation with subtle ray-anchor pull (Google Maps XR feel):
-                // moving your hand in 3D space slides the Earth 1:1 with altitude-scaled gain,
-                // and sweeping your wrist/ray across the map adds responsive long-range reach.
-                var worldDelta = Vector3.ProjectOnPlane(handDelta, mapUp) * gain;
+                if (g.moved < GrabSettleM) return false;
 
-                if (TryIntersectMapPlane(i, out var curRayHit))
+                // Google Maps Immersive View: "pinch and drag … pull the world towards you".
+                // Keep the grabbed map point stuck under the current aim ray — true 1:1,
+                // no altitude-scaled hand gain (that was launching the map).
+                if (!TryIntersectMapPlane(i, out var rayHit))
                 {
-                    if (g.hasRayHit)
+                    // Fallback: gentle 1:1 hand slide on the map plane if the ray misses.
+                    var fallback = Vector3.ProjectOnPlane(handDelta, mapUp);
+                    if (fallback.sqrMagnitude > 1e-8f && g.moved > DragThresholdM)
                     {
-                        var rayDelta = Vector3.ProjectOnPlane(curRayHit - g.lastRayHit, mapUp);
-                        // Blend 35% ray delta clamped so wrist micro-jitter never jumps the map
-                        float maxStep = ViewerHeight() * 0.18f;
-                        if (rayDelta.magnitude > maxStep)
-                            rayDelta = rayDelta.normalized * maxStep;
-                        worldDelta += rayDelta * 0.35f;
+                        world.Root.position += fallback;
+                        CaptureSoftInertia(fallback);
+                        return true;
                     }
-                    g.lastRayHit = curRayHit;
-                    g.hasRayHit = true;
+                    return false;
                 }
+
+                if (!g.hasGrab)
+                {
+                    g.grabLocal = world.Root.InverseTransformPoint(rayHit);
+                    g.hasGrab = true;
+                    return false;
+                }
+
+                var grabbedNow = world.Root.TransformPoint(g.grabLocal);
+                var worldDelta = Vector3.ProjectOnPlane(rayHit - grabbedNow, mapUp);
+
+                // Cap one-frame jumps (tracking glitches) without altitude amplification.
+                float maxStep = Mathf.Clamp(ViewerHeight() * 0.08f, 0.35f, 12f);
+                if (worldDelta.magnitude > maxStep)
+                    worldDelta = worldDelta.normalized * maxStep;
 
                 if (worldDelta.sqrMagnitude > 1e-8f && g.moved > DragThresholdM)
                 {
                     world.Root.position += worldDelta;
-                    float dt = Mathf.Max(Time.deltaTime, 0.004f);
-                    _panVelocity = Vector3.Lerp(_panVelocity, worldDelta / dt, 0.45f);
-                    // Re-sample ray anchor after moving the world so it doesn't feed back
-                    g.hasRayHit = TryIntersectMapPlane(i, out g.lastRayHit);
+                    CaptureSoftInertia(worldDelta);
                     return true;
                 }
             }
@@ -281,32 +303,37 @@ namespace TakXr.Locomotion
                     _prevAngle = angle;
                     _prevAvgY = avgY;
                     _panVelocity = Vector3.zero;
+                    // Clear single-hand anchors so we don't mix modes.
+                    _grabs[0].hasGrab = false;
+                    _grabs[1].hasGrab = false;
                 }
                 else
                 {
                     bool moved = false;
                     var focusPivot = world.GetFocusPivot(cameraTransform);
 
-                    // 1. Two-hand Pan along map plane
+                    // 1. Two-hand pan — 1:1 hand midpoint on the map plane (Maps dual-hand drag).
+                    //    Do NOT multiply by altitude PanGain (that made dual-hand wild).
                     var midDelta = Vector3.ProjectOnPlane(mid - _prevMid, mapUp);
+                    float twoHandGain = TwoHandPanGain();
+                    midDelta *= twoHandGain;
+                    float maxTwo = Mathf.Clamp(ViewerHeight() * 0.06f, 0.25f, 8f);
+                    if (midDelta.magnitude > maxTwo)
+                        midDelta = midDelta.normalized * maxTwo;
                     if (midDelta.sqrMagnitude > 1e-8f)
                     {
-                        world.Root.position += midDelta * gain;
+                        world.Root.position += midDelta;
                         moved = true;
                     }
 
-                    // 2. Two-hand Stretch / Pinch Zoom about the map focus point in front of the viewer
-                    //    (so zooming with your hands in your lap zooms the map in front of your eyes,
-                    //    not the air around your waist!)
-                    if (_prevDist > 0.03f && dist > 0.03f)
+                    // 2. Two-hand stretch / pinch zoom (Maps: move hands closer/further).
+                    if (_prevDist > 0.04f && dist > 0.04f)
                     {
                         float rawFactor = dist / _prevDist;
-                        // Exaggerate stretch slightly (1.45x) so comfortable hand motion zooms quickly
-                        float factor = 1f + (rawFactor - 1f) * 1.45f;
-                        if (Mathf.Abs(factor - 1f) > 0.0015f)
+                        // Near 1:1 with hand spacing — slight 1.1x feel, not the old 1.45x rocket zoom.
+                        float factor = 1f + (rawFactor - 1f) * 1.1f;
+                        if (Mathf.Abs(factor - 1f) > 0.0025f)
                         {
-                            // In standard 1:1 DEM mode, zoom by moving the world along mapUp (altitude)
-                            // so DEM LOD rings refine naturally; in Tabletop mode, scale the miniature.
                             bool isTabletop = TakXr.UI.XrTacticalToolsSuite.Instance != null &&
                                               TakXr.UI.XrTacticalToolsSuite.Instance.IsTabletopActive;
                             if (isTabletop)
@@ -315,30 +342,28 @@ namespace TakXr.Locomotion
                             }
                             else
                             {
-                                // Pull hands apart (factor > 1) -> zoom IN (move closer to focusPivot)
-                                float zoomStep = Mathf.Clamp(factor - 1f, -0.25f, 0.25f);
+                                // Hands apart (factor > 1) → zoom IN toward focus in front of eyes.
+                                float zoomStep = Mathf.Clamp(factor - 1f, -0.12f, 0.12f);
                                 var toPivot = cameraTransform.position - focusPivot;
-                                world.Root.position += toPivot * (zoomStep * 1.35f);
+                                world.Root.position += toPivot * zoomStep;
                             }
                             moved = true;
                         }
                     }
 
-                    // 3. Two-hand Twist -> Rotate map around its surface normal
+                    // 3. Two-hand twist → rotate around map surface normal (Maps steering wheel).
                     float dAngle = Mathf.DeltaAngle(_prevAngle * Mathf.Rad2Deg, angle * Mathf.Rad2Deg) * Mathf.Deg2Rad;
-                    if (Mathf.Abs(dAngle) > 0.002f)
+                    if (Mathf.Abs(dAngle) > 0.003f)
                     {
                         world.RotateAboutMapUp(focusPivot, dAngle);
                         moved = true;
                     }
 
-                    // 4. Controller-free Two-Hand Vertical Lift/Lower -> Smoothly Tilt the Earth!
-                    //    Lifting both pinched hands upward tilts the far horizon UP into Wall View;
-                    //    lowering both hands flattens it back toward 0°.
+                    // 4. Dual-hand lift → gentle tilt (was 165°/m — far too twitchy).
                     float dy = avgY - _prevAvgY;
-                    if (Mathf.Abs(dy) > 0.0015f)
+                    if (Mathf.Abs(dy) > 0.004f)
                     {
-                        ApplyPitchDelta(dy * 165f);
+                        ApplyPitchDelta(dy * 55f);
                         _onPitchChanged?.Invoke(_savedPitchDeg);
                         moved = true;
                     }
@@ -353,6 +378,16 @@ namespace TakXr.Locomotion
             else _twoHand = false;
 
             return false;
+        }
+
+        void CaptureSoftInertia(Vector3 worldDelta)
+        {
+            float dt = Mathf.Max(Time.deltaTime, 0.008f);
+            var sample = worldDelta / dt;
+            // Light blend + hard cap so release never flings the map.
+            _panVelocity = Vector3.Lerp(_panVelocity, sample, 0.22f);
+            if (_panVelocity.magnitude > InertiaMaxSpeed)
+                _panVelocity = _panVelocity.normalized * InertiaMaxSpeed;
         }
 
         bool UpdateWorldTilt()
@@ -503,9 +538,15 @@ namespace TakXr.Locomotion
             return Mathf.Clamp(Mathf.Abs(h), 8f, 8000f);
         }
 
-        float PanGain() => Mathf.Clamp(ViewerHeight() * 0.72f, 3f, 5000f);
+        /// <summary>
+        /// Dual-hand midpoint pan: mild altitude feel without the old 0.72×height×5000 rocket.
+        /// Single-hand pan no longer uses this — it is pure ray-anchor 1:1.
+        /// </summary>
+        float TwoHandPanGain() =>
+            Mathf.Clamp(ViewerHeight() * 0.045f * _speedMul, 0.85f, 18f);
 
-        float MoveSpeed() => Mathf.Clamp(ViewerHeight() * 1.6f * _speedMul, 8f, 12000f);
+        /// <summary>Thumbstick / keyboard glide — calmer than the previous 1.6×height curve.</summary>
+        float MoveSpeed() => Mathf.Clamp(ViewerHeight() * 0.55f * _speedMul, 4f, 900f);
 
         public void OrientNorth() => world?.OrientNorth(cameraTransform);
 

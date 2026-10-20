@@ -32,7 +32,7 @@ namespace TakXr.Cot
         const float LabelMinCharSize = 0.016f;   // lower floor — near clamp shrinks further
         const float LabelNearMaxWorldH = 16f;    // ceiling inside the near zone only
         const float LabelAbsMaxWorldH = 300f;    // sanity ceiling (only binds beyond 12.5 km)
-        const float LabelFontSize = 256f;        // match XrText.CrispFontSize raster
+        const float LabelFontSize = 384f;        // match XrText.CrispFontSize raster
         const float LabelHover3D = 0.52f;        // fraction of marker meters above 3D center
 
         // Crowded markers (several CoTs at nearly the same spot) shrink so the
@@ -752,7 +752,7 @@ namespace TakXr.Cot
             {
                 _labelShadow.fontSize = _label.fontSize;
                 _labelShadow.characterSize = _label.characterSize;
-                _labelShadow.transform.localPosition = new Vector3(h * 0.05f, -h * 0.05f, h * 0.03f);
+                _labelShadow.transform.localPosition = new Vector3(h * 0.06f, -h * 0.07f, h * 0.03f);
             }
 
             if (_labelPlate != null && _labelRend != null)
@@ -762,9 +762,10 @@ namespace TakXr.Cot
                 {
                     _labelPlate.gameObject.SetActive(true);
                     _labelPlate.localPosition =
-                        new Vector3(b.center.x, b.center.y, h * 0.06f);
+                        new Vector3(b.center.x, b.center.y, h * 0.08f);
+                    // Slightly larger dark plate so callsigns stay readable over bright terrain.
                     _labelPlate.localScale =
-                        new Vector3(b.size.x + h * 0.5f, b.size.y + h * 0.3f, 1f);
+                        new Vector3(b.size.x + h * 0.7f, b.size.y + h * 0.45f, 1f);
                 }
                 else
                 {
@@ -877,10 +878,11 @@ namespace TakXr.Cot
             _label.alignment = TextAlignment.Center;
             _label.fontSize = (int)LabelFontSize;
             _label.characterSize = LabelMinCharSize;
-            _label.color = new Color(1f, 1f, 0.95f, 0.98f);
+            _label.color = new Color(1f, 1f, 0.98f, 1f);
             _label.font = XrText.SharedFont
                           ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
                           ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+            XrText.Sharpen(_label);
             ForceFontBilinear(_label);
             _labelRend = labelGo.GetComponent<MeshRenderer>();
             if (_labelRend != null)
@@ -897,7 +899,7 @@ namespace TakXr.Cot
             _labelShadow.alignment = _label.alignment;
             _labelShadow.fontSize = _label.fontSize;
             _labelShadow.characterSize = _label.characterSize;
-            _labelShadow.color = new Color(0f, 0f, 0f, 0.9f);
+            _labelShadow.color = new Color(0f, 0f, 0f, 0.95f);
             _labelShadow.font = _label.font;
             var sr = shadowGo.GetComponent<MeshRenderer>();
             if (sr != null)
@@ -920,7 +922,8 @@ namespace TakXr.Cot
                 _labelPlateRend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 _labelPlateRend.receiveShadows = false;
                 var pm = _labelPlateRend.material;
-                var plateColor = new Color(0.02f, 0.03f, 0.05f, 0.62f);
+                // Darker plate so callsign edges stay crisp over bright earth / sky.
+                var plateColor = new Color(0.01f, 0.02f, 0.04f, 0.78f);
                 if (pm.HasProperty("_BaseColor")) pm.SetColor("_BaseColor", plateColor);
                 if (pm.HasProperty("_Color")) pm.SetColor("_Color", plateColor);
                 pm.renderQueue = 3000;
@@ -959,8 +962,8 @@ namespace TakXr.Cot
 
         static void ForceFontBilinear(TextMesh tm)
         {
-            if (tm?.font?.material?.mainTexture == null) return;
-            tm.font.material.mainTexture.filterMode = FilterMode.Bilinear;
+            if (tm?.font == null) return;
+            XrText.ForceCrispFiltering(tm.font);
         }
 
         static Material GetUnlitMaterial()

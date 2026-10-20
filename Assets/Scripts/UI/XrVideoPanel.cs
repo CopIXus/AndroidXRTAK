@@ -607,8 +607,10 @@ namespace TakXr.UI
             tm.text = msg;
             // Crisp world text: large fontSize, tiny characterSize
             // (world height = characterSize * fontSize * 0.1).
-            tm.characterSize = charSize;
-            tm.fontSize = 300;
+            tm.characterSize = charSize * 300f / TakXr.UI.XrText.CrispFontSize;
+            tm.fontSize = TakXr.UI.XrText.CrispFontSize;
+            tm.font = TakXr.UI.XrText.SharedFont;
+            TakXr.UI.XrText.Sharpen(tm);
             tm.anchor = TextAnchor.MiddleCenter;
             tm.alignment = TextAlignment.Center;
             tm.color = color;

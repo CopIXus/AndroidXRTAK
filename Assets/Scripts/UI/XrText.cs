@@ -9,7 +9,7 @@ namespace TakXr.UI
     /// <summary>
     /// Shared XR text factory. Prefers TextMeshPro SDF when a font asset is
     /// available (smooth at any distance); otherwise creates a high-density
-    /// TextMesh with bilinear atlas filtering and an automatic widthfitter
+    /// TextMesh with trilinear atlas filtering and an automatic widthfitter
     /// (<see cref="XrTextAutoFit"/>) so no header, button label, or list row
     /// ever bleeds outside its column or collides with neighboring UI items.
     ///
@@ -18,10 +18,18 @@ namespace TakXr.UI
     /// </summary>
     public static class XrText
     {
-        public const int CrispFontSize = 256;
+        /// <summary>
+        /// Raster density for TextMesh glyphs. Higher = cleaner edges under MSAA
+        /// (bitmap fonts stay soft if the atlas is undersampled).
+        /// </summary>
+        public const int CrispFontSize = 384;
         const float LegacyFontSize = 64f;
+        const string PrefetchGlyphs =
+            " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" +
+            ".,:;!?@#$%&*()+-=_/\\|[]{}<>\"'`~°·•—–…✓×←→↑↓";
 
         static Font _font;
+        static bool _glyphsWarmed;
 #if UNITY_TEXTMESHPRO || TMP_PRESENT
         static TMP_FontAsset _tmpFont;
 #endif
@@ -34,17 +42,46 @@ namespace TakXr.UI
                 {
                     _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
                             ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+                    WarmGlyphs(_font);
                 }
-                ForceBilinear(_font);
+                ForceCrispFiltering(_font);
                 return _font;
             }
         }
 
-        public static void ForceBilinear(Font font)
+        public static void ForceBilinear(Font font) => ForceCrispFiltering(font);
+
+        /// <summary>
+        /// Keep the dynamic font atlas on high-quality filtering so menu and CoT
+        /// glyphs stay sharp after atlas rebuilds (Unity often resets to Point).
+        /// </summary>
+        public static void ForceCrispFiltering(Font font)
         {
-            if (font != null && font.material != null
-                && font.material.mainTexture != null)
-                font.material.mainTexture.filterMode = FilterMode.Bilinear;
+            if (font == null) return;
+            var mat = font.material;
+            if (mat == null) return;
+            var tex = mat.mainTexture;
+            if (tex == null) return;
+            tex.filterMode = FilterMode.Trilinear;
+            tex.anisoLevel = 8;
+            tex.mipMapBias = -0.5f; // slightly sharper mip selection for thin strokes
+            if (mat.HasProperty("_MainTex"))
+                mat.mainTexture = tex;
+        }
+
+        static void WarmGlyphs(Font font)
+        {
+            if (font == null || _glyphsWarmed) return;
+            _glyphsWarmed = true;
+            try
+            {
+                font.RequestCharactersInTexture(PrefetchGlyphs, CrispFontSize, FontStyle.Normal);
+                ForceCrispFiltering(font);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[XrText] glyph warm: " + ex.Message);
+            }
         }
 
         /// <summary>
@@ -71,12 +108,22 @@ namespace TakXr.UI
             tm.alignment = alignment;
             tm.color = color;
             tm.font = SharedFont;
-            ForceBilinear(SharedFont);
+            ForceCrispFiltering(SharedFont);
+            // Ask the dynamic atlas to rasterize this string at crisp size before first draw.
+            if (!string.IsNullOrEmpty(msg) && tm.font != null)
+            {
+                try { tm.font.RequestCharactersInTexture(msg, CrispFontSize, FontStyle.Normal); }
+                catch { /* ignore */ }
+                ForceCrispFiltering(tm.font);
+            }
             var r = go.GetComponent<MeshRenderer>();
             if (r != null)
             {
                 r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 r.receiveShadows = false;
+                // Slight push so transparent glyph edges composite cleanly under MSAA.
+                if (r.sharedMaterial != null)
+                    r.material.renderQueue = 3002;
             }
 
             if (maxWidthM <= 0f && parent != null)
@@ -164,9 +211,33 @@ namespace TakXr.UI
             float maxHeightM = 0f)
         {
             var tm = Make(name, parent, localPos, msg, charSize64, color, anchor, alignment, maxWidthM, maxHeightM);
+            float worldH = tm.characterSize * CrispFontSize * 0.1f;
+
+            // Soft halo (wide, faint) + hard drop shadow — bitmap TextMesh reads much
+            // cleaner over passthrough / terrain when edges have contrast under MSAA.
+            var haloGo = new GameObject(name + "_Halo");
+            haloGo.transform.SetParent(tm.transform, false);
+            haloGo.transform.localPosition = new Vector3(0f, 0f, 0.0035f);
+            var htm = haloGo.AddComponent<TextMesh>();
+            htm.text = tm.text;
+            htm.fontSize = tm.fontSize;
+            htm.characterSize = tm.characterSize * 1.04f;
+            htm.anchor = tm.anchor;
+            htm.alignment = tm.alignment;
+            htm.color = new Color(0f, 0f, 0f, 0.55f);
+            htm.font = SharedFont;
+            ForceCrispFiltering(SharedFont);
+            var hr = haloGo.GetComponent<MeshRenderer>();
+            if (hr != null)
+            {
+                hr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                hr.receiveShadows = false;
+                if (hr.sharedMaterial != null)
+                    hr.material.renderQueue = 2998;
+            }
+
             var shadowGo = new GameObject(name + "_Shadow");
             shadowGo.transform.SetParent(tm.transform, false);
-            float worldH = tm.characterSize * CrispFontSize * 0.1f;
             shadowGo.transform.localPosition = new Vector3(worldH * 0.07f, -worldH * 0.08f, 0.002f);
 
             var stm = shadowGo.AddComponent<TextMesh>();
@@ -175,9 +246,9 @@ namespace TakXr.UI
             stm.characterSize = tm.characterSize;
             stm.anchor = tm.anchor;
             stm.alignment = tm.alignment;
-            stm.color = new Color(0f, 0f, 0f, 0.94f);
+            stm.color = new Color(0f, 0f, 0f, 0.96f);
             stm.font = SharedFont;
-            ForceBilinear(SharedFont);
+            ForceCrispFiltering(SharedFont);
 
             var sr = shadowGo.GetComponent<MeshRenderer>();
             if (sr != null)
@@ -193,7 +264,7 @@ namespace TakXr.UI
 
             var fitter = tm.GetComponent<XrTextAutoFit>();
             if (fitter != null)
-                fitter.BindShadow(stm);
+                fitter.BindShadow(stm, htm);
             return tm;
         }
 
@@ -214,12 +285,20 @@ namespace TakXr.UI
 
         public static void Sharpen(TextMesh tm)
         {
-            if (tm == null || tm.fontSize >= CrispFontSize) return;
-            float worldFactor = tm.characterSize * Mathf.Max(tm.fontSize, 1);
-            tm.fontSize = CrispFontSize;
-            tm.characterSize = worldFactor / CrispFontSize;
+            if (tm == null) return;
+            if (tm.fontSize < CrispFontSize)
+            {
+                float worldFactor = tm.characterSize * Mathf.Max(tm.fontSize, 1);
+                tm.fontSize = CrispFontSize;
+                tm.characterSize = worldFactor / CrispFontSize;
+            }
             if (tm.font == null) tm.font = SharedFont;
-            ForceBilinear(tm.font);
+            if (!string.IsNullOrEmpty(tm.text) && tm.font != null)
+            {
+                try { tm.font.RequestCharactersInTexture(tm.text, CrispFontSize, FontStyle.Normal); }
+                catch { /* ignore */ }
+            }
+            ForceCrispFiltering(tm.font);
         }
     }
 
@@ -232,6 +311,7 @@ namespace TakXr.UI
     {
         TextMesh _tm;
         TextMesh _shadowTm;
+        TextMesh _haloTm;
         MeshRenderer _rend;
         float _baseCharSize;
         float _maxWidthM;
@@ -249,9 +329,10 @@ namespace TakXr.UI
             FitNow();
         }
 
-        public void BindShadow(TextMesh shadow)
+        public void BindShadow(TextMesh shadow, TextMesh halo = null)
         {
             _shadowTm = shadow;
+            _haloTm = halo;
             SyncShadow();
         }
 
@@ -276,6 +357,14 @@ namespace TakXr.UI
         {
             if (_tm == null) return;
             _lastText = _tm.text;
+            XrText.ForceCrispFiltering(_tm.font);
+            if (!string.IsNullOrEmpty(_lastText) && _tm.font != null)
+            {
+                try { _tm.font.RequestCharactersInTexture(_lastText, XrText.CrispFontSize, FontStyle.Normal); }
+                catch { /* ignore */ }
+                XrText.ForceCrispFiltering(_tm.font);
+            }
+
             if (_maxWidthM <= 0f && _maxHeightM <= 0f)
             {
                 SyncShadow();
@@ -320,12 +409,22 @@ namespace TakXr.UI
 
         void SyncShadow()
         {
-            if (_shadowTm == null || _tm == null) return;
-            _shadowTm.text = _tm.text;
-            _shadowTm.fontSize = _tm.fontSize;
-            _shadowTm.characterSize = _tm.characterSize;
+            if (_tm == null) return;
             float worldH = _tm.characterSize * _tm.fontSize * 0.1f;
-            _shadowTm.transform.localPosition = new Vector3(worldH * 0.065f, -worldH * 0.075f, 0.002f);
+            if (_shadowTm != null)
+            {
+                _shadowTm.text = _tm.text;
+                _shadowTm.fontSize = _tm.fontSize;
+                _shadowTm.characterSize = _tm.characterSize;
+                _shadowTm.transform.localPosition = new Vector3(worldH * 0.065f, -worldH * 0.075f, 0.002f);
+            }
+            if (_haloTm != null)
+            {
+                _haloTm.text = _tm.text;
+                _haloTm.fontSize = _tm.fontSize;
+                _haloTm.characterSize = _tm.characterSize * 1.04f;
+                _haloTm.transform.localPosition = new Vector3(0f, 0f, 0.0035f);
+            }
         }
     }
 }

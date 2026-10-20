@@ -1,0 +1,16 @@
+apply plugin: 'com.android.library'
+
+android {
+    namespace "us.copix.takxr.enroll"
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 28
+        targetSdk 34
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}

@@ -69,7 +69,7 @@ namespace TakXr.UI
             string conn = feed != null ? feed.ConnectionState : "n/a";
 
             GUI.Box(new Rect(12, 12, 420, 110), GUIContent.none);
-            GUI.Label(new Rect(20, 18, 400, 24), $"TAKXR APK  FPS {_fps:0.0}", _style);
+            GUI.Label(new Rect(20, 18, 400, 24), $"XRTAK APK  FPS {_fps:0.0}", _style);
             GUI.Label(new Rect(20, 42, 400, 24), $"Tracks {tracks}  WS {conn}", _style);
             GUI.Label(new Rect(20, 66, 400, 24), $"Map {mapState}  AOI {(config != null ? config.mapRadiusMeters / 1609.344f : 0):0} mi", _style);
             string cesium = map != null && map.CesiumAvailable ? "cesium-ready" : "no-cesium-pkg";

@@ -604,20 +604,14 @@ namespace TakXr.Cot
                 var colider = go.GetComponent<Collider>();
                 if (colider != null) colider.enabled = false;
 
-                // Count label (web-style numbered bubble).
-                var labelGo = new GameObject("Count");
-                labelGo.transform.SetParent(go.transform, false);
-                labelGo.transform.localPosition = new Vector3(0f, 0.6f, 0f);
-                labelGo.transform.localScale = Vector3.one * (2.2f / Mathf.Max(scale, 1f));
-                var tm = labelGo.AddComponent<TextMesh>();
-                tm.text = count.ToString();
-                tm.anchor = TextAnchor.MiddleCenter;
-                tm.alignment = TextAlignment.Center;
-                tm.characterSize = 0.35f;
-                tm.fontSize = 120;
-                tm.color = Color.white;
-                tm.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
-                          ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+                // Count label (web-style numbered bubble) — crisp XrText raster.
+                float charSize64 = 0.35f * 120f / 64f;
+                var tm = TakXr.UI.XrText.Make(
+                    "Count", go.transform, new Vector3(0f, 0.6f, 0f),
+                    count.ToString(), charSize64, Color.white,
+                    TextAnchor.MiddleCenter, TextAlignment.Center);
+                tm.transform.localScale = Vector3.one * (2.2f / Mathf.Max(scale, 1f));
+                TakXr.UI.XrText.Sharpen(tm);
 
                 _clusters[kv.Key] = go;
             }

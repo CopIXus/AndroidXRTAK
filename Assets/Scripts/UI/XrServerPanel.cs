@@ -16,11 +16,11 @@ namespace TakXr.UI
     public class XrServerPanel : MonoBehaviour
     {
         const float PanelW = 0.98f;
-        const float PanelH = 1.08f;
-        const float RowH = 0.090f;
-        const int RowsPerPage = 5;
+        const float PanelH = 1.18f;
+        const float RowH = 0.102f;
+        const int RowsPerPage = 4;
 
-        enum Mode { List, Edit }
+        enum Mode { List, Edit, EnrollLog }
 
         class LiveRow
         {
@@ -42,12 +42,15 @@ namespace TakXr.UI
         TextMesh _title;
         TextMesh _summary;
         Transform _rowsRoot;
+        TextMesh _enrollLog;
         readonly List<(Transform root, Action onClick)> _hitTargets = new List<(Transform, Action)>();
         readonly List<LiveRow> _liveRows = new List<LiveRow>();
         readonly bool[] _wasGrabbing = new bool[2];
         float _nextClickTime;
         float _nextAutoRefresh;
+        float _nextEnrollLogRefresh;
         bool _reconnectBusy;
+        string _enrollLogTitle = "ENROLLING";
 
         Mode _mode = Mode.List;
         int _page;
@@ -98,13 +101,15 @@ namespace TakXr.UI
                 archHeight: 0.011f, depthWrap: 0.034f, renderQueue: 2995);
 
             _title = Text("Title", _root, new Vector3(-PanelW / 2f + 0.06f, PanelH / 2f - 0.048f, -0.01f),
-                "SERVERS", 0.0092f, new Color(0.88f, 0.96f, 1f, 1f),
+                "SERVERS", 0.0086f, new Color(0.88f, 0.96f, 1f, 1f),
                 TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(_title, 0.42f, 0.032f);
 
             _summary = Text("Summary", _root,
-                new Vector3(PanelW / 2f - 0.14f, PanelH / 2f - 0.048f, -0.01f),
-                "", 0.0058f, new Color(0.70f, 0.88f, 0.78f, 0.95f),
+                new Vector3(PanelW / 2f - 0.12f, PanelH / 2f - 0.048f, -0.01f),
+                "", 0.0052f, new Color(0.70f, 0.88f, 0.78f, 0.95f),
                 TextAnchor.MiddleRight, TextAlignment.Right);
+            XrText.SetMaxBounds(_summary, 0.34f, 0.032f);
 
             _rowsRoot = new GameObject("Rows").transform;
             _rowsRoot.SetParent(_root, false);
@@ -144,10 +149,60 @@ namespace TakXr.UI
             AddButton("Close", new Vector3(PanelW / 2f - 0.05f, PanelH / 2f - 0.05f, -0.01f),
                 new Vector2(0.07f, 0.05f), "X", false, Hide);
 
-            if (_mode == Mode.Edit)
+            if (_mode == Mode.EnrollLog)
+                RebuildEnrollLogUi();
+            else if (_mode == Mode.Edit)
                 RebuildEditUi();
             else
                 RebuildListUi();
+        }
+
+        void RebuildEnrollLogUi()
+        {
+            _title.text = _enrollLogTitle ?? "ENROLLING";
+            if (_summary != null) _summary.text = "Live";
+
+            Quad("LogBg", _rowsRoot, new Vector3(0f, 0.02f, -0.004f),
+                new Vector2(PanelW - 0.10f, 0.78f),
+                new Color(0.03f, 0.07f, 0.11f, 0.98f), 2998);
+
+            LeftLabel("LogHint", new Vector3(-PanelW / 2f + 0.06f, PanelH / 2f - 0.12f, -0.01f),
+                "Enrollment log — ports, HTTPS, signing (usually a few seconds)", 0.0054f,
+                new Color(0.70f, 0.88f, 0.78f, 0.95f));
+
+            _enrollLog = Text("EnrollLog", _rowsRoot,
+                new Vector3(-PanelW / 2f + 0.06f, 0.28f, -0.012f),
+                TakConnectionLog.FormatScroll(12, 70),
+                0.0050f,
+                new Color(0.82f, 0.92f, 0.78f, 0.98f),
+                TextAnchor.UpperLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(_enrollLog, PanelW - 0.14f, 0.72f);
+
+            float by = -PanelH / 2f + 0.08f;
+            AddButton("LogBack", new Vector3(0f, by, -0.01f), new Vector2(0.28f, 0.048f),
+                _reconnectBusy ? "Working…" : "Close", false, () =>
+                {
+                    if (_reconnectBusy) return;
+                    _mode = Mode.List;
+                    _enrollLog = null;
+                    RebuildUi();
+                });
+        }
+
+        void RefreshEnrollLog()
+        {
+            if (_mode != Mode.EnrollLog || _enrollLog == null) return;
+            _enrollLog.text = TakConnectionLog.FormatScroll(12, 70);
+            if (_summary != null)
+                _summary.text = _reconnectBusy ? "Working…" : "Done";
+        }
+
+        void ShowEnrollLog(string title)
+        {
+            _enrollLogTitle = string.IsNullOrEmpty(title) ? "ENROLLING" : title;
+            _mode = Mode.EnrollLog;
+            _editTarget = null;
+            if (IsVisible) RebuildUi();
         }
 
         void RebuildListUi()
@@ -177,22 +232,22 @@ namespace TakXr.UI
                     new Color(0.72f, 0.82f, 0.90f, 0.9f));
             }
 
-            float by = -PanelH / 2f + 0.085f;
+            float by = -PanelH / 2f + 0.072f;
             if (maxPage > 0)
             {
-                AddButton("Prev", new Vector3(-0.42f, by + 0.058f, -0.01f), new Vector2(0.10f, 0.040f),
+                AddButton("Prev", new Vector3(-0.40f, by + 0.062f, -0.01f), new Vector2(0.10f, 0.038f),
                     "<", false, () => { _page = Mathf.Max(0, _page - 1); RebuildUi(); });
-                Text("Page", _rowsRoot, new Vector3(-0.28f, by + 0.058f, -0.01f),
-                    $"{_page + 1}/{maxPage + 1}", 0.0058f, new Color(0.80f, 0.88f, 0.95f, 0.95f));
-                AddButton("Next", new Vector3(-0.14f, by + 0.058f, -0.01f), new Vector2(0.10f, 0.040f),
+                Text("Page", _rowsRoot, new Vector3(-0.26f, by + 0.062f, -0.01f),
+                    $"{_page + 1}/{maxPage + 1}", 0.0054f, new Color(0.80f, 0.88f, 0.95f, 0.95f));
+                AddButton("Next", new Vector3(-0.12f, by + 0.062f, -0.01f), new Vector2(0.10f, 0.038f),
                     ">", false, () => { _page = Mathf.Min(maxPage, _page + 1); RebuildUi(); });
             }
 
-            AddButton("Add", new Vector3(-0.32f, by, -0.01f), new Vector2(0.20f, 0.048f),
+            AddButton("Add", new Vector3(-0.30f, by, -0.01f), new Vector2(0.18f, 0.044f),
                 "Add", false, OnAddServer);
-            AddButton("Type", new Vector3(-0.06f, by, -0.01f), new Vector2(0.24f, 0.048f),
+            AddButton("Type", new Vector3(-0.04f, by, -0.01f), new Vector2(0.22f, 0.044f),
                 "Type host", false, OnTypeHost);
-            AddButton("Qr", new Vector3(0.24f, by, -0.01f), new Vector2(0.22f, 0.048f),
+            AddButton("Qr", new Vector3(0.26f, by, -0.01f), new Vector2(0.22f, 0.044f),
                 "Scan QR", false, OnScanQr);
 
             RefreshStatus();
@@ -219,47 +274,57 @@ namespace TakXr.UI
             _editTarget.enrollPort = enroll;
             _editTarget.martiPort = marti;
 
-            float y = PanelH / 2f - 0.14f;
-            EditRow("Name", "Name", Trunc(_editTarget.displayName ?? "Server", 24), y, OnTypeEditName);
-            y -= 0.068f;
-            EditRow("Host", "Server", Trunc(_editTarget.host ?? "required", 24), y, OnTypeEditHost);
-            y -= 0.068f;
+            float y = PanelH / 2f - 0.13f;
+            EditRow("Name", "Name", Trunc(_editTarget.displayName ?? "Server", 20), y, OnTypeEditName);
+            y -= 0.072f;
+            EditRow("Host", "Server", Trunc(_editTarget.host ?? "required", 20), y, OnTypeEditHost);
+            y -= 0.072f;
             EditRow("Port", "Port", cot.ToString(), y, OnTypeEditCotPort);
-            y -= 0.068f;
-            EditRow("Enroll", "Enroll port", enroll.ToString(), y, OnTypeEditEnrollPort);
-            y -= 0.068f;
-            EditRow("User", "Username", Trunc(string.IsNullOrEmpty(_editTarget.username) ? "required" : _editTarget.username, 24), y, OnTypeEditUsername);
-            y -= 0.068f;
-            EditRow("Pass", "Password", string.IsNullOrEmpty(_editTarget.password) ? "required" : "saved", y, OnTypeEditPassword);
-            y -= 0.068f;
-            EditRow("Marti", "Marti port", marti.ToString(), y, OnTypeEditMartiPort);
-            y -= 0.062f;
+            y -= 0.072f;
+            EditRow("Enroll", "Enroll", enroll.ToString(), y, OnTypeEditEnrollPort);
+            y -= 0.072f;
+            EditRow("User", "User", Trunc(string.IsNullOrEmpty(_editTarget.username) ? "required" : _editTarget.username, 18), y, OnTypeEditUsername);
+            y -= 0.072f;
+            EditRow("Pass", "Pass", string.IsNullOrEmpty(_editTarget.password) ? "required" : "••••", y, OnTypeEditPassword);
+            y -= 0.072f;
+            EditRow("Marti", "Marti", marti.ToString(), y, OnTypeEditMartiPort);
+            y -= 0.058f;
 
             string certStatus = TakCertStore.StatusLabel(_editTarget.id, _config);
-            LeftLabel("CertLbl", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
-                "Cert  " + Trunc(certStatus, 28), 0.006f,
-                new Color(0.75f, 0.9f, 0.8f, 0.95f));
-            y -= 0.048f;
-            LeftLabel("Hint", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
-                "Enroll uses username and password. A QR fills these in.", 0.0052f,
-                new Color(0.65f, 0.78f, 0.9f, 0.85f));
+            var certTm = Text("CertLbl", _rowsRoot, new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
+                "Cert  " + Trunc(certStatus, 36), 0.0054f,
+                new Color(0.75f, 0.9f, 0.8f, 0.95f),
+                TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(certTm, PanelW - 0.16f, 0.028f);
+            y -= 0.040f;
+            var hintTm = Text("Hint", _rowsRoot, new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
+                "Enroll or Scan QR — password/token required", 0.0048f,
+                new Color(0.65f, 0.78f, 0.9f, 0.85f),
+                TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(hintTm, PanelW - 0.16f, 0.024f);
 
-            float by = -PanelH / 2f + 0.08f;
-            AddButton("Back", new Vector3(-0.38f, by, -0.01f), new Vector2(0.15f, 0.048f),
+            float by = -PanelH / 2f + 0.072f;
+            AddButton("Back", new Vector3(-0.36f, by, -0.01f), new Vector2(0.14f, 0.044f),
                 "Back", false, () => { _mode = Mode.List; _editTarget = null; RebuildUi(); });
-            AddButton("ImportCert", new Vector3(-0.16f, by, -0.01f), new Vector2(0.18f, 0.048f),
+            AddButton("ImportCert", new Vector3(-0.14f, by, -0.01f), new Vector2(0.16f, 0.044f),
                 "Import", false, OnImportCert);
-            AddButton("Enroll", new Vector3(0.10f, by, -0.01f), new Vector2(0.22f, 0.048f),
+            AddButton("Enroll", new Vector3(0.10f, by, -0.01f), new Vector2(0.20f, 0.044f),
                 "Enroll", true, OnEnroll);
-            AddButton("Done", new Vector3(0.36f, by, -0.01f), new Vector2(0.16f, 0.048f),
+            AddButton("Done", new Vector3(0.34f, by, -0.01f), new Vector2(0.14f, 0.044f),
                 "Done", false, OnEditDone);
         }
 
         void EditRow(string key, string label, string value, float y, Action onType)
         {
-            LeftLabel(key + "Lbl", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
-                label + "   " + value, 0.0066f);
-            AddButton("Type" + key, new Vector3(0.34f, y, -0.01f), new Vector2(0.16f, 0.046f),
+            var lbl = Text(key + "Lbl", _rowsRoot, new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
+                label, 0.0056f, new Color(0.70f, 0.82f, 0.92f, 0.95f),
+                TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(lbl, 0.16f, 0.028f);
+            var val = Text(key + "Val", _rowsRoot, new Vector3(-PanelW / 2f + 0.22f, y, -0.01f),
+                value ?? "", 0.0062f, new Color(0.92f, 0.96f, 1f, 0.98f),
+                TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(val, 0.42f, 0.028f);
+            AddButton("Type" + key, new Vector3(0.36f, y, -0.01f), new Vector2(0.14f, 0.042f),
                 "Edit", false, onType);
         }
 
@@ -289,35 +354,39 @@ namespace TakXr.UI
             _hitTargets.Add((toggle, () => OnToggleConnect(id)));
 
             string host = string.IsNullOrEmpty(entry.host) ? (entry.displayName ?? "?") : entry.host;
-            string title = Trunc(host, 26);
+            string title = Trunc(host, 22);
             int port = entry.cotPort > 0 ? entry.cotPort : 8089;
             string sub = $"SSL:{port}";
             if (!string.IsNullOrEmpty(entry.username))
-                sub += "  ·  " + Trunc(entry.username, 16);
-            if (marti) sub += "  ·  Marti";
+                sub += " · " + Trunc(entry.username, 12);
+            if (marti) sub += " · Marti";
             if (!string.IsNullOrEmpty(entry.displayName) &&
                 !string.Equals(entry.displayName, entry.host, StringComparison.OrdinalIgnoreCase))
-                sub = Trunc(entry.displayName, 18) + "  ·  " + sub;
+                sub = Trunc(entry.displayName, 14) + " · " + sub;
 
-            var hostTm = Text("Host", row, new Vector3(-PanelW / 2f + 0.13f, 0.016f, -0.008f),
-                title, 0.0062f, Color.white, TextAnchor.MiddleLeft, TextAlignment.Left);
-            XrText.SetMaxBounds(hostTm, 0.46f, 0.028f);
-            var subTm = Text("Sub", row, new Vector3(-PanelW / 2f + 0.13f, -0.012f, -0.008f),
-                sub, 0.0046f, new Color(0.70f, 0.82f, 0.92f, 0.92f),
+            // Keep host/sub left of the status badge so text never draws on top of it.
+            const float textLeft = -PanelW / 2f + 0.13f;
+            const float textMaxW = 0.38f;
+            var hostTm = Text("Host", row, new Vector3(textLeft, 0.022f, -0.008f),
+                title, 0.0058f, Color.white, TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(hostTm, textMaxW, 0.026f);
+            var subTm = Text("Sub", row, new Vector3(textLeft, -0.004f, -0.008f),
+                Trunc(sub, 40), 0.0044f, new Color(0.70f, 0.82f, 0.92f, 0.92f),
                 TextAnchor.MiddleLeft, TextAlignment.Left);
-            XrText.SetMaxBounds(subTm, 0.46f, 0.024f);
+            XrText.SetMaxBounds(subTm, textMaxW, 0.022f);
 
             var badgeGo = new GameObject("Badge").transform;
             badgeGo.SetParent(row, false);
-            badgeGo.localPosition = new Vector3(PanelW / 2f - 0.22f, 0.014f, -0.006f);
-            var badgeBg = Quad("BadgeBg", badgeGo, Vector3.zero, new Vector2(0.22f, 0.032f),
+            badgeGo.localPosition = new Vector3(PanelW / 2f - 0.20f, 0.018f, -0.006f);
+            var badgeBg = Quad("BadgeBg", badgeGo, Vector3.zero, new Vector2(0.18f, 0.030f),
                 new Color(0.18f, 0.20f, 0.22f, 0.97f), 3005);
             var badgeTm = Text("BadgeLabel", badgeGo, new Vector3(0f, 0f, -0.004f),
-                "Disconnected", 0.0048f, Color.white);
+                "Off", 0.0044f, Color.white);
 
-            var errTm = Text("Err", row, new Vector3(-PanelW / 2f + 0.13f, -0.032f, -0.008f),
-                "", 0.0044f, new Color(0.95f, 0.45f, 0.42f, 0.98f),
+            var errTm = Text("Err", row, new Vector3(textLeft, -0.028f, -0.008f),
+                "", 0.0040f, new Color(0.95f, 0.45f, 0.42f, 0.98f),
                 TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(errTm, textMaxW, 0.020f);
 
             // Tap the error line to flash the full message (row truncates).
             var errHit = new GameObject("ErrHit").transform;
@@ -401,7 +470,7 @@ namespace TakXr.UI
                 if (string.Equals(raw, "connecting", StringComparison.OrdinalIgnoreCase) &&
                     (err == null || err.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) < 0))
                     showErr = false;
-                live.Error.text = showErr ? Trunc(err, 56) : "";
+                live.Error.text = showErr ? Trunc(err, 38) : "";
             }
         }
 
@@ -474,8 +543,13 @@ namespace TakXr.UI
 
         void RefreshStatus()
         {
+            if (_mode == Mode.EnrollLog)
+            {
+                RefreshEnrollLog();
+                return;
+            }
             if (_summary != null)
-                _summary.text = _reconnectBusy ? "Connecting…" : BuildSummary();
+                _summary.text = Trunc(_reconnectBusy ? "Busy…" : BuildSummary(), 28);
 
             if (_mode != Mode.List || _liveRows.Count == 0) return;
             var list = _dir?.ServerList;
@@ -859,8 +933,10 @@ namespace TakXr.UI
             if (entry.enrollPort <= 0) entry.enrollPort = 8446;
             _reconnectBusy = true;
             string who = entry.username + " @ " + entry.host;
-            if (_summary != null) _summary.text = "Enrolling…";
-            _flash?.Invoke("Enrolling " + who + " — server may take 1–2 min to sign the cert…");
+            TakConnectionLog.EnsureFile();
+            TakConnectionLog.Info(entry.id, entry.host, "UI enroll " + who + " port " + entry.enrollPort);
+            ShowEnrollLog("ENROLLING");
+            _flash?.Invoke("Enrolling " + who + " — watch the log (usually a few seconds)");
 
             bool ok = false;
             string error = null;
@@ -873,8 +949,9 @@ namespace TakXr.UI
                 _reconnectBusy = false;
                 entry.certNote = "enroll failed";
                 TakServerDirectory.UpdateEntry(_dir, entry);
-                _flash?.Invoke(string.IsNullOrEmpty(error) ? "Enrollment failed" : error);
-                if (IsVisible) OpenEdit(entry);
+                _enrollLogTitle = "ENROLL FAILED";
+                if (IsVisible) RebuildUi();
+                _flash?.Invoke(string.IsNullOrEmpty(error) ? "Enrollment failed" : Trunc(error, 120));
                 yield break;
             }
 
@@ -883,15 +960,26 @@ namespace TakXr.UI
             TakServerDirectory.SetActive(_dir, entry.id);
             TakServerDirectory.ApplyToConfig(_config, entry);
             _layers?.RebindMartiHost();
-            _flash?.Invoke("Enrolled " + entry.username);
-            _mode = Mode.List;
-            _editTarget = null;
-            _reconnectBusy = false;
+            TakConnectionLog.Info(entry.id, entry.host, "Enrolled OK — connecting stream…");
+            _enrollLogTitle = "ENROLLED";
             if (IsVisible) RebuildUi();
+            _flash?.Invoke("Enrolled " + entry.username);
+            _reconnectBusy = false;
             if (connectAfter)
+            {
+                _reconnectBusy = true;
+                ShowEnrollLog("CONNECTING");
                 yield return ConnectOneCo(entry.id, "Connecting to " + entry.host + ":" + entry.cotPort + "…");
+                _enrollLogTitle = _direct != null && _direct.IsServerConnected(entry.id)
+                    ? "CONNECTED"
+                    : "CONNECT STATUS";
+                if (IsVisible) RebuildUi();
+            }
             else if (IsVisible)
+            {
+                _mode = Mode.List;
                 RebuildUi();
+            }
         }
 
         IEnumerator ConnectOneCo(string id, string msg)
@@ -1004,10 +1092,15 @@ namespace TakXr.UI
             if (!IsVisible) return;
             PlaceFacing();
 
-            if (_mode == Mode.List && Time.unscaledTime >= _nextAutoRefresh)
+            if (_mode == Mode.EnrollLog && Time.unscaledTime >= _nextEnrollLogRefresh)
+            {
+                _nextEnrollLogRefresh = Time.unscaledTime + 0.4f;
+                RefreshEnrollLog();
+            }
+            else if (_mode == Mode.List && Time.unscaledTime >= _nextAutoRefresh)
             {
                 _nextAutoRefresh = Time.unscaledTime + 0.8f;
-                if (_mode == Mode.List && !_reconnectBusy) RefreshStatus();
+                if (!_reconnectBusy) RefreshStatus();
             }
 
             for (int h = 0; h < 2; h++)

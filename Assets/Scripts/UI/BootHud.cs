@@ -49,7 +49,7 @@ namespace TakXr.UI
             _detail = MakeLabel(panelGo.transform, "Detail", 20, FontStyle.Normal,
                 new Vector2(0.04f, 0.05f), new Vector2(0.96f, 0.55f));
 
-            SetStatus("TAKXR", "Starting…");
+            SetStatus("XRTAK", "Starting…");
         }
 
         static Text MakeLabel(Transform parent, string name, int size, FontStyle style, Vector2 amin, Vector2 amax)

@@ -164,10 +164,34 @@ namespace TakXr.Core
             return sb.ToString();
         }
 
+        /// <summary>Oldest → newest lines for a scrolling enroll status panel.</summary>
+        public static string FormatScroll(int max = 10, int maxLineChars = 72)
+        {
+            var snap = Snapshot(max);
+            if (snap.Count == 0) return "Waiting for enrollment events…";
+            var sb = new StringBuilder();
+            for (int i = snap.Count - 1; i >= 0; i--)
+            {
+                if (sb.Length > 0) sb.Append('\n');
+                string line = FormatOneShort(snap[i], maxLineChars);
+                sb.Append(line);
+            }
+            return sb.ToString();
+        }
+
         static string FormatOne(Entry e)
         {
             string host = string.IsNullOrEmpty(e.Host) ? "?" : e.Host;
             return $"{e.Level} {host} — {e.Message}";
+        }
+
+        static string FormatOneShort(Entry e, int maxChars)
+        {
+            string msg = e.Message ?? "";
+            // Prefer the message body; drop long host prefixes for the HUD log.
+            string line = $"{e.Level}  {msg}";
+            if (line.Length <= maxChars) return line;
+            return line.Substring(0, Math.Max(1, maxChars - 1)) + "…";
         }
     }
 }

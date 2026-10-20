@@ -37,6 +37,7 @@ namespace TakXr.Cot
         int _bootGeneration;
         byte[] _p12;
         string _p12Password;
+        X509Certificate2 _openedCert;
         string _serverId;
         string _bindHost;
         int _bindPort;
@@ -48,6 +49,18 @@ namespace TakXr.Cot
         string _lastError;
         volatile bool _everConnected;
         int _consecutiveFailures;
+        bool _autoEnrollAttempted;
+        string _selfUid = "takxr-user";
+        string _selfCallsign = "XR-USER";
+        string _selfTeam = "Cyan";
+        string _selfRole = "Team Member";
+        string _selfCotType = "b-m-p-s-p-loc";
+        string _appVersion = "0.1.0";
+        string _deviceModel = "Android XR";
+        double _originLat;
+        double _originLon;
+        double _originAlt;
+        float _nextPingTime;
 
         SslStream _activeStream;
         readonly object _sendLock = new object();
@@ -135,34 +148,105 @@ namespace TakXr.Cot
         IEnumerator Boot(int gen)
         {
             _state = "loading-cert";
+            var dir = TakServerDirectory.LoadOrSeed(_config);
             string serverId = _serverId;
-            if (string.IsNullOrEmpty(serverId))
+            TakServerEntry entry = null;
+            if (!string.IsNullOrEmpty(serverId) && dir?.servers != null)
             {
-                var active = TakServerDirectory.GetActive(TakServerDirectory.LoadOrSeed(_config));
-                serverId = active?.id;
-                if (active != null && string.IsNullOrEmpty(_bindHost))
-                    BindServer(active.id, active.host, active.cotPort);
+                foreach (var s in dir.servers)
+                    if (s != null && s.id == serverId) { entry = s; break; }
+            }
+            if (entry == null)
+            {
+                entry = TakServerDirectory.GetActive(dir);
+                if (string.IsNullOrEmpty(serverId)) serverId = entry?.id;
+                if (entry != null && string.IsNullOrEmpty(_bindHost))
+                    BindServer(entry.id, entry.host, entry.cotPort);
             }
 
-            // Always reload via TakCertStore so per-server imported P12 applies.
+            try
+            {
+                var id = TakIdentity.Load();
+                if (id != null)
+                {
+                    if (!string.IsNullOrEmpty(id.clientUid)) _selfUid = id.clientUid;
+                    if (!string.IsNullOrEmpty(id.callsign)) _selfCallsign = id.callsign;
+                    if (!string.IsNullOrEmpty(id.team)) _selfTeam = id.team;
+                    if (!string.IsNullOrEmpty(id.role)) _selfRole = id.role;
+                    if (!string.IsNullOrEmpty(id.cotType)) _selfCotType = id.cotType;
+                }
+                _appVersion = Application.version ?? "0.1.0";
+                _deviceModel = SystemInfo.deviceModel ?? "Android XR";
+                if (_config != null)
+                {
+                    _originLat = _config.originLat;
+                    _originLon = _config.originLon;
+                    _originAlt = _config.originAlt;
+                }
+            }
+            catch { /* ignore */ }
+
+            // Always reload via TakCertStore so a per-server enrolled cert applies.
             _p12 = null;
             _p12Password = null;
-            yield return TakCertStore.LoadP12Routine(_config, serverId, (bytes, pwd) =>
-            {
-                _p12 = bytes;
-                _p12Password = pwd;
-            });
+            _openedCert = null;
+            TakCertStore.CertMaterial loaded = null;
+            yield return TakCertStore.LoadRoutine(_config, serverId, mat => loaded = mat);
 
             if (gen != _bootGeneration) yield break;
 
-            if (_p12 == null || _p12.Length == 0)
+            // If no valid client cert yet, but the server entry has enrollment credentials
+            // (e.g. from QR scan or manual entry), automatically enroll right now.
+            if ((loaded == null || loaded.Certificate == null) &&
+                !_autoEnrollAttempted &&
+                entry != null &&
+                !string.IsNullOrWhiteSpace(entry.host) &&
+                !string.IsNullOrWhiteSpace(entry.username) &&
+                !string.IsNullOrEmpty(entry.password))
             {
-                _state = "cert-missing";
-                _lastError = "Client cert missing — Import cert or place takclient.p12 in StreamingAssets";
+                _autoEnrollAttempted = true;
+                int enrollPort = entry.enrollPort > 0 ? entry.enrollPort : 8446;
+                TakConnectionLog.Info(serverId, entry.host,
+                    $"Auto-enrolling {entry.username} on {entry.host}:{enrollPort}…");
+                bool enrollOk = false;
+                string enrollErr = null;
+                yield return TakEnrollmentClient.Enroll(
+                    serverId, entry.host, enrollPort, entry.username, entry.password,
+                    (ok, msg) => { enrollOk = ok; enrollErr = msg; });
+                if (gen != _bootGeneration) yield break;
+                if (enrollOk)
+                {
+                    entry.certNote = "enrolled";
+                    TakServerDirectory.UpdateEntry(dir, entry);
+                    loaded = null;
+                    yield return TakCertStore.LoadRoutine(_config, serverId, mat => loaded = mat);
+                    if (gen != _bootGeneration) yield break;
+                }
+                else if (!string.IsNullOrEmpty(enrollErr))
+                {
+                    _state = "error";
+                    _lastError = enrollErr;
+                    TakConnectionLog.Error(serverId, BoundHost ?? "?", _lastError);
+                    yield break;
+                }
+            }
+
+            if (loaded == null || loaded.Certificate == null)
+            {
+                _state = loaded != null && !string.IsNullOrEmpty(loaded.Error) &&
+                         loaded.Error.IndexOf("No client certificate", StringComparison.Ordinal) < 0
+                    ? "error"
+                    : "cert-missing";
+                _lastError = loaded != null && !string.IsNullOrEmpty(loaded.Error)
+                    ? loaded.Error
+                    : "Client cert missing — Enroll with server, port, username, and password";
                 TakConnectionLog.Error(serverId, BoundHost ?? "?", _lastError);
                 Debug.LogWarning("[TakDirect] " + _lastError);
                 yield break;
             }
+            _openedCert = loaded.Certificate;
+            _p12 = loaded.P12;
+            _p12Password = loaded.Password;
 
             // Don't start a second worker if one is still alive.
             if (_thread != null && _thread.IsAlive)
@@ -171,7 +255,7 @@ namespace TakXr.Cot
                 yield break;
             }
 
-            Debug.Log($"[TakDirect] cert loaded ({_p12.Length} B) — connecting {BoundHost}:{BoundPort}");
+            Debug.Log($"[TakDirect] cert loaded — connecting {BoundHost}:{BoundPort}");
             _stop = false;
             _thread = new Thread(ConnectionLoop) { IsBackground = true, Name = "TakDirect-" + (BoundHost ?? "?") };
             _thread.Start();
@@ -192,6 +276,12 @@ namespace TakXr.Cot
 
         void Update()
         {
+            if (_state == "connected" && Time.unscaledTime >= _nextPingTime)
+            {
+                _nextPingTime = Time.unscaledTime + 20f;
+                SendCot(BuildPingXml(_selfUid));
+            }
+
             // Drain parsed CoTs onto the main thread.
             if (_feed == null) return;
             lock (_lock)
@@ -212,17 +302,27 @@ namespace TakXr.Cot
 
         void ConnectionLoop()
         {
-            X509Certificate2 cert;
-            try
+            X509Certificate2 cert = _openedCert;
+            if (cert == null && _p12 != null && _p12.Length > 0)
             {
-                cert = TakCertStore.CreateCert(_p12, P12Password);
+                try
+                {
+                    cert = TakCertStore.CreateCert(_p12, P12Password);
+                }
+                catch (Exception ex)
+                {
+                    _lastError = TakCertStore.DescribeCertError(ex);
+                    _state = "error";
+                    TakConnectionLog.Error(_serverId, BoundHost ?? "?", _lastError);
+                    Debug.LogError("[TakDirect] failed to load p12: " + _lastError);
+                    return;
+                }
             }
-            catch (Exception ex)
+            if (cert == null)
             {
-                _lastError = "cert: " + ex.Message;
-                _state = "error";
+                _lastError = "Client cert missing — Enroll with server, port, username, and password";
+                _state = "cert-missing";
                 TakConnectionLog.Error(_serverId, BoundHost ?? "?", _lastError);
-                Debug.LogError("[TakDirect] failed to load p12: " + ex.Message);
                 return;
             }
 
@@ -251,8 +351,13 @@ namespace TakXr.Cot
                     }
 
                     TakConnectionLog.Info(_serverId, endpoint, "TLS handshake…");
-                    // TAK servers use internal CAs — accept the server cert (parity with backend).
-                    ssl = new SslStream(tcp.GetStream(), false, (_, _, _, _) => true);
+                    // TAK servers use internal CAs — accept the server cert and always
+                    // present our enrolled client cert without requiring OS CA chain build.
+                    ssl = new SslStream(
+                        tcp.GetStream(),
+                        false,
+                        (_, _, _, _) => true,
+                        (_, _, localCerts, _, _) => localCerts != null && localCerts.Count > 0 ? localCerts[0] : cert);
                     ssl.AuthenticateAsClient(BoundHost, certs, SslProtocols.Tls12, false);
 
                     _state = "connected";
@@ -263,6 +368,12 @@ namespace TakXr.Cot
                     _activeStream = ssl;
                     TakConnectionLog.Info(_serverId, endpoint, "Connected (TLS + client cert)");
                     Debug.Log($"[TakDirect] connected to {endpoint} (TLS, client cert)");
+
+                    // Immediately announce our streaming endpoint (<contact endpoint="*:-1:stcp"/>)
+                    // and send a keepalive ping so TAK Server registers our subscription and routes
+                    // inbound CoT + Contacts presence right away (same as TAK_Beacon TakConnection.kt).
+                    SendCot(BuildInitialSaXml());
+                    SendCot(BuildPingXml(_selfUid));
 
                     ReadLoop(ssl);
                 }
@@ -384,6 +495,65 @@ namespace TakXr.Cot
             return events;
         }
 
+        string BuildInitialSaXml()
+        {
+            var now = DateTime.UtcNow;
+            var cot = new NormalizedCot
+            {
+                uid = string.IsNullOrEmpty(_selfUid) ? "takxr-user" : _selfUid,
+                type = string.IsNullOrEmpty(_selfCotType) ? TakIdentity.ObserverCotType : _selfCotType,
+                how = "m-g",
+                time = now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                start = now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                stale = now.AddSeconds(30).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                point = new CotPoint
+                {
+                    lat = _originLat,
+                    lon = _originLon,
+                    hae = (float)_originAlt,
+                    ce = 9999999f,
+                    le = 9999999f,
+                },
+                contact = new CotContact
+                {
+                    callsign = string.IsNullOrEmpty(_selfCallsign) ? "XR-USER" : _selfCallsign,
+                    endpoint = "*:-1:stcp",
+                },
+                detail = new CotDetail
+                {
+                    team = new CotTeam
+                    {
+                        name = string.IsNullOrEmpty(_selfTeam) ? "Cyan" : _selfTeam,
+                        role = string.IsNullOrEmpty(_selfRole) ? "Team Member" : _selfRole,
+                    },
+                    remarks = "VRTAK XR observer",
+                    takv = new CotTakv
+                    {
+                        platform = TakIdentity.ObserverPlatform,
+                        version = _appVersion,
+                        device = _deviceModel,
+                        os = "Android XR",
+                    },
+                    userIcon = new CotUserIcon
+                    {
+                        iconsetpath = TakIdentity.ManIconsetPath,
+                    },
+                },
+            };
+            return CotXmlBuilder.Build(cot);
+        }
+
+        static string BuildPingXml(string uid)
+        {
+            var now = DateTime.UtcNow;
+            string t = now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+            string stale = now.AddSeconds(20).ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+            string safeUid = string.IsNullOrEmpty(uid) ? "takxr" : uid;
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+                   $"<event version=\"2.0\" uid=\"{safeUid}-ping\" type=\"t-x-c-t\" how=\"m-g\" time=\"{t}\" start=\"{t}\" stale=\"{stale}\">" +
+                   "<point lat=\"0.0\" lon=\"0.0\" hae=\"0.0\" ce=\"9999999.0\" le=\"9999999.0\"/><detail/></event>";
+        }
+
         public static NormalizedCot ParseCot(string xml)
         {
             try
@@ -395,6 +565,11 @@ namespace TakXr.Cot
 
                 var uid = ev.GetAttribute("uid");
                 if (string.IsNullOrEmpty(uid)) return null;
+
+                var evType = ev.GetAttribute("type") ?? "";
+                if (evType.StartsWith("t-x-c-t", StringComparison.OrdinalIgnoreCase) ||
+                    evType.StartsWith("t-x-takp", StringComparison.OrdinalIgnoreCase))
+                    return null;
 
                 var pointNode = ev.SelectSingleNode("point") as XmlElement;
                 if (pointNode == null) return null;

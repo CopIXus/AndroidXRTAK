@@ -16,7 +16,7 @@ namespace TakXr.UI
     public class XrServerPanel : MonoBehaviour
     {
         const float PanelW = 0.98f;
-        const float PanelH = 0.84f;
+        const float PanelH = 1.08f;
         const float RowH = 0.090f;
         const int RowsPerPage = 5;
 
@@ -53,9 +53,6 @@ namespace TakXr.UI
         int _page;
         TakServerDirectory.State _dir;
         TakServerEntry _editTarget;
-        int _hostPresetIdx;
-        int _cotPortIdx;
-        int _martiPortIdx;
         XrKeyboardPanel _keyboard;
         XrQrScanPanel _qrScan;
 
@@ -176,7 +173,7 @@ namespace TakXr.UI
             if (total == 0)
             {
                 Text("Empty", _rowsRoot, new Vector3(0f, 0.10f, -0.01f),
-                    "No servers yet — Add, type a host, or scan a QR", 0.0064f,
+                    "No servers yet — Add, type a host, or scan an enrollment QR", 0.0064f,
                     new Color(0.72f, 0.82f, 0.90f, 0.9f));
             }
 
@@ -210,66 +207,60 @@ namespace TakXr.UI
                 return;
             }
             _title.text = "EDIT SERVER";
-            if (_summary != null) _summary.text = Trunc(_editTarget.host ?? "", 22);
+            if (_summary != null)
+                _summary.text = string.IsNullOrEmpty(_editTarget.username)
+                    ? Trunc(_editTarget.host ?? "", 22)
+                    : Trunc(_editTarget.username, 22);
 
-            var hosts = TakServerDirectory.HostChoices(_dir);
-            _hostPresetIdx = IndexOfIgnoreCase(hosts, _editTarget.host);
-            if (_hostPresetIdx < 0) { hosts.Insert(0, _editTarget.host ?? ""); _hostPresetIdx = 0; }
+            int cot = _editTarget.cotPort > 0 ? _editTarget.cotPort : 8089;
+            int enroll = _editTarget.enrollPort > 0 ? _editTarget.enrollPort : 8446;
+            int marti = _editTarget.martiPort > 0 ? _editTarget.martiPort : 8443;
+            _editTarget.cotPort = cot;
+            _editTarget.enrollPort = enroll;
+            _editTarget.martiPort = marti;
 
-            _cotPortIdx = IndexOfInt(TakServerDirectory.CotPortPresets, _editTarget.cotPort);
-            if (_cotPortIdx < 0) _cotPortIdx = 0;
-            _martiPortIdx = IndexOfInt(TakServerDirectory.MartiPortPresets, _editTarget.martiPort);
-            if (_martiPortIdx < 0) _martiPortIdx = 0;
-
-            float y = 0.22f;
-            LeftLabel("NameLbl", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
-                Trunc(_editTarget.displayName ?? "Server", 28), 0.008f);
-            y -= 0.08f;
-
-            // Host cycle
-            LeftLabel("HostLbl", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
-                "Host  " + Trunc(_editTarget.host ?? "?", 28), 0.0072f);
-            AddButton("TypeHost", new Vector3(0.22f, y, -0.01f), new Vector2(0.22f, 0.048f),
-                "Type", false, OnTypeEditHost);
-            y -= 0.075f;
-
-            // CoT port
-            LeftLabel("CotLbl", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
-                $"CoT port  {_editTarget.cotPort}", 0.0072f);
-            AddButton("CotPrev", new Vector3(0.22f, y, -0.01f), new Vector2(0.08f, 0.048f),
-                "<", false, () => CycleCotPort(-1));
-            AddButton("CotNext", new Vector3(0.34f, y, -0.01f), new Vector2(0.08f, 0.048f),
-                ">", false, () => CycleCotPort(+1));
-            y -= 0.075f;
-
-            // Marti port
-            LeftLabel("MartiLbl", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
-                $"Marti port  {_editTarget.martiPort}", 0.0072f);
-            AddButton("MartiPrev", new Vector3(0.22f, y, -0.01f), new Vector2(0.08f, 0.048f),
-                "<", false, () => CycleMartiPort(-1));
-            AddButton("MartiNext", new Vector3(0.34f, y, -0.01f), new Vector2(0.08f, 0.048f),
-                ">", false, () => CycleMartiPort(+1));
-            y -= 0.09f;
-
-            LeftLabel("Hint", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
-                "Checkbox on the list turns the stream on or off", 0.0054f,
-                new Color(0.65f, 0.78f, 0.9f, 0.85f));
-            y -= 0.06f;
+            float y = PanelH / 2f - 0.14f;
+            EditRow("Name", "Name", Trunc(_editTarget.displayName ?? "Server", 24), y, OnTypeEditName);
+            y -= 0.068f;
+            EditRow("Host", "Server", Trunc(_editTarget.host ?? "required", 24), y, OnTypeEditHost);
+            y -= 0.068f;
+            EditRow("Port", "Port", cot.ToString(), y, OnTypeEditCotPort);
+            y -= 0.068f;
+            EditRow("Enroll", "Enroll port", enroll.ToString(), y, OnTypeEditEnrollPort);
+            y -= 0.068f;
+            EditRow("User", "Username", Trunc(string.IsNullOrEmpty(_editTarget.username) ? "required" : _editTarget.username, 24), y, OnTypeEditUsername);
+            y -= 0.068f;
+            EditRow("Pass", "Password", string.IsNullOrEmpty(_editTarget.password) ? "required" : "saved", y, OnTypeEditPassword);
+            y -= 0.068f;
+            EditRow("Marti", "Marti port", marti.ToString(), y, OnTypeEditMartiPort);
+            y -= 0.062f;
 
             string certStatus = TakCertStore.StatusLabel(_editTarget.id, _config);
             LeftLabel("CertLbl", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
-                "Cert  " + Trunc(certStatus, 36), 0.0064f,
+                "Cert  " + Trunc(certStatus, 28), 0.006f,
                 new Color(0.75f, 0.9f, 0.8f, 0.95f));
+            y -= 0.048f;
+            LeftLabel("Hint", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
+                "Enroll uses username and password. A QR fills these in.", 0.0052f,
+                new Color(0.65f, 0.78f, 0.9f, 0.85f));
 
-            float by = -PanelH / 2f + 0.085f;
-            AddButton("Back", new Vector3(-0.38f, by, -0.01f), new Vector2(0.16f, 0.048f),
+            float by = -PanelH / 2f + 0.08f;
+            AddButton("Back", new Vector3(-0.38f, by, -0.01f), new Vector2(0.15f, 0.048f),
                 "Back", false, () => { _mode = Mode.List; _editTarget = null; RebuildUi(); });
-            AddButton("Marti", new Vector3(-0.16f, by, -0.01f), new Vector2(0.22f, 0.048f),
-                "Use Marti", false, () => OnSetPrimary(_editTarget.id));
-            AddButton("ImportCert", new Vector3(0.10f, by, -0.01f), new Vector2(0.22f, 0.048f),
-                "Import cert", false, OnImportCert);
-            AddButton("Done", new Vector3(0.36f, by, -0.01f), new Vector2(0.18f, 0.048f),
-                "Done", true, OnEditDone);
+            AddButton("ImportCert", new Vector3(-0.16f, by, -0.01f), new Vector2(0.18f, 0.048f),
+                "Import", false, OnImportCert);
+            AddButton("Enroll", new Vector3(0.10f, by, -0.01f), new Vector2(0.22f, 0.048f),
+                "Enroll", true, OnEnroll);
+            AddButton("Done", new Vector3(0.36f, by, -0.01f), new Vector2(0.16f, 0.048f),
+                "Done", false, OnEditDone);
+        }
+
+        void EditRow(string key, string label, string value, float y, Action onType)
+        {
+            LeftLabel(key + "Lbl", new Vector3(-PanelW / 2f + 0.06f, y, -0.01f),
+                label + "   " + value, 0.0066f);
+            AddButton("Type" + key, new Vector3(0.34f, y, -0.01f), new Vector2(0.16f, 0.046f),
+                "Edit", false, onType);
         }
 
         void AddServerRow(TakServerEntry entry, bool marti, float y)
@@ -301,6 +292,8 @@ namespace TakXr.UI
             string title = Trunc(host, 26);
             int port = entry.cotPort > 0 ? entry.cotPort : 8089;
             string sub = $"SSL:{port}";
+            if (!string.IsNullOrEmpty(entry.username))
+                sub += "  ·  " + Trunc(entry.username, 16);
             if (marti) sub += "  ·  Marti";
             if (!string.IsNullOrEmpty(entry.displayName) &&
                 !string.Equals(entry.displayName, entry.host, StringComparison.OrdinalIgnoreCase))
@@ -512,9 +505,22 @@ namespace TakXr.UI
             bool on = entry != null && entry.wantConnected;
             bool live = _direct != null && _direct.IsServerSession(id);
             if (on || live)
+            {
                 StartCoroutine(DisconnectOneCo(id));
-            else
-                StartCoroutine(ConnectOneCo(id, "Connecting to " + (entry?.host ?? "?") + "…"));
+                return;
+            }
+            if (entry != null && !TakCertStore.HasCertForServer(entry.id))
+            {
+                if (MissingEnrollment(entry) == null)
+                {
+                    StartCoroutine(EnrollAndConnect(entry, connectAfter: true));
+                    return;
+                }
+                _flash?.Invoke(MissingEnrollment(entry) ?? "Enter server, port, username, and password, then Enroll");
+                OpenEdit(entry);
+                return;
+            }
+            StartCoroutine(ConnectOneCo(id, "Connecting to " + (entry?.host ?? "?") + "…"));
         }
 
         void OnAddServer()
@@ -617,15 +623,27 @@ namespace TakXr.UI
         {
             if (_editTarget != null)
             {
-                if (string.IsNullOrEmpty(_editTarget.displayName))
-                    _editTarget.displayName = _editTarget.host;
-                TakServerDirectory.UpdateEntry(_dir, _editTarget);
-                string savedId = _editTarget.id;
-                bool reconnect = _dir != null && savedId == _dir.activeId && _editTarget.wantConnected;
+                var target = _editTarget;
+                if (string.IsNullOrEmpty(target.displayName))
+                    target.displayName = target.host;
+                TakServerDirectory.UpdateEntry(_dir, target);
+                TakServerDirectory.SetActive(_dir, target.id);
+                TakServerDirectory.ApplyToConfig(_config, target);
+
+                bool hasCert = TakCertStore.HasCertForServer(target.id) &&
+                               !string.Equals(target.certNote, "enroll failed", StringComparison.OrdinalIgnoreCase);
+                if (!hasCert && MissingEnrollment(target) == null && !_reconnectBusy)
+                {
+                    StartCoroutine(EnrollAndConnect(target, connectAfter: true));
+                    return;
+                }
+
+                string savedId = target.id;
+                bool shouldConnect = hasCert && !string.IsNullOrWhiteSpace(target.host);
                 _mode = Mode.List;
                 _editTarget = null;
                 RebuildUi();
-                if (reconnect && !_reconnectBusy)
+                if (shouldConnect && !_reconnectBusy)
                     StartCoroutine(ConnectOneCo(savedId, "Saved · Connecting…"));
                 return;
             }
@@ -635,33 +653,76 @@ namespace TakXr.UI
             RefreshStatus();
         }
 
-        void CycleHost(List<string> hosts, int delta)
-        {
-            if (_editTarget == null || hosts == null || hosts.Count == 0) return;
-            _hostPresetIdx = ((_hostPresetIdx + delta) % hosts.Count + hosts.Count) % hosts.Count;
-            _editTarget.host = hosts[_hostPresetIdx];
-            TakServerDirectory.UpdateEntry(_dir, _editTarget);
-            RebuildUi();
-        }
-
-        void CycleCotPort(int delta)
+        void OnTypeEditName()
         {
             if (_editTarget == null) return;
-            var presets = TakServerDirectory.CotPortPresets;
-            _cotPortIdx = ((_cotPortIdx + delta) % presets.Length + presets.Length) % presets.Length;
-            _editTarget.cotPort = presets[_cotPortIdx];
-            TakServerDirectory.UpdateEntry(_dir, _editTarget);
-            RebuildUi();
+            OpenKeyboard("SERVER NAME", _editTarget.displayName ?? "", 48, text =>
+            {
+                if (_editTarget == null) return;
+                _editTarget.displayName = string.IsNullOrWhiteSpace(text) ? _editTarget.host : text.Trim();
+                TakServerDirectory.UpdateEntry(_dir, _editTarget);
+                RebuildUi();
+            });
         }
 
-        void CycleMartiPort(int delta)
+        void OnTypeEditCotPort() => TypePort("STREAM PORT", _editTarget != null ? _editTarget.cotPort : 8089, 8089, p => _editTarget.cotPort = p);
+        void OnTypeEditEnrollPort() => TypePort("ENROLL PORT", _editTarget != null ? _editTarget.enrollPort : 8446, 8446, p => _editTarget.enrollPort = p);
+        void OnTypeEditMartiPort() => TypePort("MARTI PORT", _editTarget != null ? _editTarget.martiPort : 8443, 8443, p => _editTarget.martiPort = p);
+
+        void TypePort(string title, int current, int fallback, Action<int> apply)
         {
             if (_editTarget == null) return;
-            var presets = TakServerDirectory.MartiPortPresets;
-            _martiPortIdx = ((_martiPortIdx + delta) % presets.Length + presets.Length) % presets.Length;
-            _editTarget.martiPort = presets[_martiPortIdx];
+            int shown = current > 0 ? current : fallback;
+            OpenKeyboard(title, shown.ToString(), 5, text =>
+            {
+                if (_editTarget == null) return;
+                if (!int.TryParse((text ?? "").Trim(), out var p) || p < 1 || p > 65535)
+                {
+                    _flash?.Invoke("Port must be 1–65535");
+                    return;
+                }
+                apply(p);
+                TakServerDirectory.UpdateEntry(_dir, _editTarget);
+                RebuildUi();
+            });
+        }
+
+        void OnTypeEditUsername()
+        {
+            if (_editTarget == null) return;
+            OpenKeyboard("USERNAME", _editTarget.username ?? "", 64, text =>
+            {
+                if (_editTarget == null) return;
+                _editTarget.username = (text ?? "").Trim();
+                TakServerDirectory.UpdateEntry(_dir, _editTarget);
+                RebuildUi();
+            });
+        }
+
+        void OnTypeEditPassword()
+        {
+            if (_editTarget == null) return;
+            OpenKeyboard("PASSWORD", _editTarget.password ?? "", 128, text =>
+            {
+                if (_editTarget == null) return;
+                _editTarget.password = text ?? "";
+                TakServerDirectory.UpdateEntry(_dir, _editTarget);
+                RebuildUi();
+            });
+        }
+
+        void OpenKeyboard(string title, string initial, int maxLen, Action<string> onCommit)
+        {
+            if (_keyboard == null)
+                _keyboard = XrKeyboardPanel.Create();
+            _keyboard.Open(_cam, title, initial ?? "", onCommit, maxLen);
+        }
+
+        void OnEnroll()
+        {
+            if (_editTarget == null || _reconnectBusy) return;
             TakServerDirectory.UpdateEntry(_dir, _editTarget);
-            RebuildUi();
+            StartCoroutine(EnrollAndConnect(_editTarget, connectAfter: true));
         }
 
         void OnSelectServer(string id) => OnToggleConnect(id);
@@ -741,20 +802,96 @@ namespace TakXr.UI
         void ApplyQrPayload(string raw)
         {
             var parsed = TakQrParser.Parse(raw);
-            if (parsed == null)
+            if (parsed == null || string.IsNullOrWhiteSpace(parsed.Host))
             {
-                _flash?.Invoke("QR not a TAK server config");
+                _flash?.Invoke("QR is not a TAK enrollment code");
+                return;
+            }
+            if (_reconnectBusy)
+            {
+                _flash?.Invoke("Wait for the current enroll or connect to finish");
                 return;
             }
             _dir = TakServerDirectory.LoadOrSeed(_config);
             var created = TakServerDirectory.AddFromHost(
                 _dir, parsed.Host, parsed.Port, parsed.MartiPort, parsed.Name);
             if (created == null) return;
-            created.enrollPort = parsed.EnrollPort > 0 ? parsed.EnrollPort : 8446;
+            if (parsed.EnrollPort > 0) created.enrollPort = parsed.EnrollPort;
+            else if (created.enrollPort <= 0) created.enrollPort = 8446;
+            if (!string.IsNullOrWhiteSpace(parsed.Username))
+                created.username = parsed.Username.Trim();
+            if (!string.IsNullOrEmpty(parsed.Password))
+                created.password = parsed.Password;
+            if (created.cotPort <= 0) created.cotPort = 8089;
             TakServerDirectory.UpdateEntry(_dir, created);
-            _flash?.Invoke("QR: " + created.host + " (using current cert)");
-            if (!_reconnectBusy)
-                StartCoroutine(ConnectOneCo(created.id, "Connecting to " + created.host + "…"));
+            TakServerDirectory.SetActive(_dir, created.id);
+            TakServerDirectory.ApplyToConfig(_config, created);
+
+            string missing = MissingEnrollment(created);
+            if (missing != null)
+            {
+                _flash?.Invoke("QR saved " + created.host + ". " + missing + ", then Enroll.");
+                OpenEdit(created);
+                return;
+            }
+            StartCoroutine(EnrollAndConnect(created, connectAfter: true));
+        }
+
+        static string MissingEnrollment(TakServerEntry entry)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(entry.host)) return "Server host is required";
+            if (entry.cotPort <= 0) return "Port is required";
+            if (string.IsNullOrWhiteSpace(entry.username)) return "Username is required";
+            if (string.IsNullOrEmpty(entry.password)) return "Password is required";
+            return null;
+        }
+
+        IEnumerator EnrollAndConnect(TakServerEntry entry, bool connectAfter)
+        {
+            if (entry == null) yield break;
+            string missing = MissingEnrollment(entry);
+            if (missing != null)
+            {
+                _flash?.Invoke(missing);
+                OpenEdit(entry);
+                yield break;
+            }
+            if (entry.enrollPort <= 0) entry.enrollPort = 8446;
+            _reconnectBusy = true;
+            string who = entry.username + " @ " + entry.host;
+            if (_summary != null) _summary.text = "Enrolling…";
+            _flash?.Invoke("Enrolling " + who + " — server may take 1–2 min to sign the cert…");
+
+            bool ok = false;
+            string error = null;
+            yield return TakEnrollmentClient.Enroll(
+                entry.id, entry.host, entry.enrollPort, entry.username, entry.password,
+                (success, message) => { ok = success; error = message; });
+
+            if (!ok)
+            {
+                _reconnectBusy = false;
+                entry.certNote = "enroll failed";
+                TakServerDirectory.UpdateEntry(_dir, entry);
+                _flash?.Invoke(string.IsNullOrEmpty(error) ? "Enrollment failed" : error);
+                if (IsVisible) OpenEdit(entry);
+                yield break;
+            }
+
+            entry.certNote = "enrolled";
+            TakServerDirectory.UpdateEntry(_dir, entry);
+            TakServerDirectory.SetActive(_dir, entry.id);
+            TakServerDirectory.ApplyToConfig(_config, entry);
+            _layers?.RebindMartiHost();
+            _flash?.Invoke("Enrolled " + entry.username);
+            _mode = Mode.List;
+            _editTarget = null;
+            _reconnectBusy = false;
+            if (IsVisible) RebuildUi();
+            if (connectAfter)
+                yield return ConnectOneCo(entry.id, "Connecting to " + entry.host + ":" + entry.cotPort + "…");
+            else if (IsVisible)
+                RebuildUi();
         }
 
         IEnumerator ConnectOneCo(string id, string msg)
@@ -779,7 +916,7 @@ namespace TakXr.UI
                 if (st == "error" || st == "cert-missing")
                 {
                     string err = _direct.ServerError(id) ?? TakConnectionLog.LastError ?? st;
-                    _flash?.Invoke(Trunc(err, 72));
+                    _flash?.Invoke(Trunc(err, 160));
                     break;
                 }
                 string pending = _direct.ServerError(id);
@@ -787,7 +924,7 @@ namespace TakXr.UI
                     pending.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     // First timeout often already set LastError while still "connecting".
-                    _flash?.Invoke(Trunc(pending, 72));
+                    _flash?.Invoke(Trunc(pending, 160));
                     break;
                 }
                 yield return new WaitForSecondsRealtime(0.35f);
@@ -797,7 +934,7 @@ namespace TakXr.UI
             {
                 string err = _direct.ServerError(id) ?? TakConnectionLog.LastError;
                 if (!string.IsNullOrEmpty(err))
-                    _flash?.Invoke(Trunc(err, 72));
+                    _flash?.Invoke(Trunc(err, 160));
             }
 
             _reconnectBusy = false;

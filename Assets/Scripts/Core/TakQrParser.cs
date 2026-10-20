@@ -24,8 +24,20 @@ namespace TakXr.Core
             if (string.IsNullOrWhiteSpace(raw)) return null;
             var text = raw.Trim();
 
-            if (text.StartsWith("tak://", StringComparison.OrdinalIgnoreCase))
+            if (text.StartsWith("tak://", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("takbeacon://", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("tak%3A", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("takbeacon%3A", StringComparison.OrdinalIgnoreCase))
+            {
+                if (text.IndexOf("%3A", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                    text.IndexOf("://", StringComparison.Ordinal) < 0)
+                    text = Uri.UnescapeDataString(text);
                 return ParseTakUri(text);
+            }
+
+            if (text.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                text.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+                return ParseHttp(text);
 
             if (text.StartsWith("{"))
                 return ParseJson(text);
@@ -37,6 +49,36 @@ namespace TakXr.Core
                 return new TakQrConnection { Host = text, Port = 8089, EnrollPort = 8446, MartiPort = 8443 };
 
             return null;
+        }
+
+        static TakQrConnection ParseHttp(string text)
+        {
+            if (!Uri.TryCreate(text, UriKind.Absolute, out var uri)) return null;
+            if (string.IsNullOrEmpty(uri.Host)) return null;
+            int port = uri.IsDefaultPort ? 0 : uri.Port;
+            int cot = 8089;
+            int enroll = 8446;
+            if (port == 8446)
+                enroll = 8446;
+            else if (port > 0 && port != 8443)
+                cot = port;
+            var q = ParseQuery(uri.Query);
+            q.TryGetValue("username", out var user);
+            if (string.IsNullOrWhiteSpace(user)) q.TryGetValue("user", out user);
+            string pass = null;
+            if (q.TryGetValue("token", out var tok) && !string.IsNullOrEmpty(tok)) pass = tok;
+            else if (q.TryGetValue("password", out var pw)) pass = pw;
+            q.TryGetValue("name", out var name);
+            return new TakQrConnection
+            {
+                Name = string.IsNullOrWhiteSpace(name) ? uri.Host : name.Trim(),
+                Host = uri.Host,
+                Port = cot,
+                EnrollPort = enroll,
+                MartiPort = 8443,
+                Username = string.IsNullOrWhiteSpace(user) ? null : user.Trim(),
+                Password = string.IsNullOrEmpty(pass) ? null : pass,
+            };
         }
 
         static TakQrConnection ParseTakUri(string text)
@@ -82,15 +124,23 @@ namespace TakXr.Core
                 port = qp;
 
             int enroll = 8446;
-            if (q.TryGetValue("enrollPort", out var ep) && int.TryParse(ep, out var ev) && ev > 0)
-                enroll = ev;
+            foreach (var ek in new[] { "enrollPort", "enrollmentPort", "csrport", "csr_port" })
+            {
+                if (q.TryGetValue(ek, out var ep) && int.TryParse(ep, out var ev) && ev > 0)
+                {
+                    enroll = ev;
+                    break;
+                }
+            }
 
-            q.TryGetValue("username", out var user);
+            if (!q.TryGetValue("username", out var user) || string.IsNullOrWhiteSpace(user))
+                q.TryGetValue("user", out user);
             string pass = null;
-            if (q.TryGetValue("token", out var tok)) pass = tok;
+            if (q.TryGetValue("token", out var tok) && !string.IsNullOrEmpty(tok)) pass = tok;
             else if (q.TryGetValue("password", out var pw)) pass = pw;
 
-            q.TryGetValue("name", out var name);
+            if (!q.TryGetValue("name", out var name) || string.IsNullOrWhiteSpace(name))
+                q.TryGetValue("description", out name);
 
             return new TakQrConnection
             {
@@ -140,7 +190,8 @@ namespace TakXr.Core
                     EnrollPort = obj.enrollPort > 0 ? obj.enrollPort : 8446,
                     MartiPort = obj.martiPort > 0 ? obj.martiPort : 8443,
                     Username = string.IsNullOrEmpty(obj.username) ? null : obj.username,
-                    Password = string.IsNullOrEmpty(obj.password) ? null : obj.password,
+                    Password = !string.IsNullOrEmpty(obj.password) ? obj.password
+                        : (string.IsNullOrEmpty(obj.token) ? null : obj.token),
                 };
             }
             catch
@@ -159,6 +210,7 @@ namespace TakXr.Core
             public int martiPort;
             public string username;
             public string password;
+            public string token;
         }
 
         static TakQrConnection ParseCsv(string text)
@@ -170,6 +222,30 @@ namespace TakXr.Core
             var host = parts[1].Trim();
             if (string.IsNullOrEmpty(host)) return null;
             if (!int.TryParse(parts[2].Trim(), out var port) || port <= 0) return null;
+
+            // iTAK: Name,host,port,ssl
+            // TAK enrollment: Name,host,port,ssl,username,password
+            // or Name,host,port,username,password
+            string user = null;
+            string pass = null;
+            if (parts.Length >= 4)
+            {
+                string proto = parts[3].Trim();
+                bool protoField = proto.Equals("ssl", StringComparison.OrdinalIgnoreCase)
+                    || proto.Equals("tcp", StringComparison.OrdinalIgnoreCase)
+                    || proto.Equals("udp", StringComparison.OrdinalIgnoreCase)
+                    || proto.Equals("quic", StringComparison.OrdinalIgnoreCase);
+                if (protoField)
+                {
+                    if (parts.Length >= 5) user = parts[4].Trim();
+                    if (parts.Length >= 6) pass = parts[5].Trim();
+                }
+                else
+                {
+                    user = proto;
+                    if (parts.Length >= 5) pass = parts[4].Trim();
+                }
+            }
             return new TakQrConnection
             {
                 Name = string.IsNullOrEmpty(name) ? null : name,
@@ -177,6 +253,8 @@ namespace TakXr.Core
                 Port = port,
                 EnrollPort = 8446,
                 MartiPort = 8443,
+                Username = string.IsNullOrEmpty(user) ? null : user,
+                Password = string.IsNullOrEmpty(pass) ? null : pass,
             };
         }
 
@@ -205,6 +283,9 @@ namespace TakXr.Core
             var c = Parse("InfraTAK,tak.example.com,8089,ssl");
             if (c == null || c.Host != "tak.example.com" || c.Port != 8089)
                 Debug.LogError("[TakQrParser] iTAK CSV parse failed");
+            var d = Parse("TAK,tak.example.com,8089,ssl,operator,s3cret");
+            if (d == null || d.Username != "operator" || d.Password != "s3cret" || d.Port != 8089)
+                Debug.LogError("[TakQrParser] enrollment CSV parse failed");
         }
     }
 }

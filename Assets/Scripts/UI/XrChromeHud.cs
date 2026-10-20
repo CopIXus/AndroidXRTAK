@@ -766,14 +766,13 @@ namespace TakXr.UI
             });
             Tool("diag", "plugins", "Diagnostics", () =>
             {
+                TakConnectionLog.EnsureFile();
                 string recent = TakConnectionLog.FormatRecent(6);
-                if (string.IsNullOrEmpty(recent))
-                    FlashStatus("No TAK connection log yet");
-                else
-                {
-                    Debug.Log("[TakConn] dump:\n" + recent);
-                    FlashStatus(recent.Length > 90 ? recent.Substring(0, 87) + "…" : recent);
-                }
+                string path = TakConnectionLog.LogPath ?? "";
+                Debug.Log("[TakConn] dump file=" + path + "\n" + recent);
+                string shown = string.IsNullOrEmpty(recent) ? "No TAK events yet" : recent;
+                shown = shown + "\nlog " + path;
+                FlashStatus(shown.Length > 180 ? shown.Substring(0, 177) + "…" : shown);
             });
             Tool("locate", "locate", "My Location", GoToMyLocation);
             Tool("size", "size", "CoT Size", () =>

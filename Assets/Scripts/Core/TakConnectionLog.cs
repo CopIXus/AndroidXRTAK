@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using UnityEngine;
 
@@ -27,6 +28,18 @@ namespace TakXr.Core
         static int _next;
         static int _count;
         static string _lastError;
+        static string _logPath;
+        static string _externalLogPath;
+
+        /// <summary>On-device log. Pull with adb from this path.</summary>
+        public static string LogPath
+        {
+            get
+            {
+                EnsureFile();
+                return _logPath;
+            }
+        }
 
         public static string LastError
         {
@@ -66,6 +79,63 @@ namespace TakXr.Core
             if (level == "E") Debug.LogError(line);
             else if (level == "W") Debug.LogWarning(line);
             else Debug.Log(line);
+            AppendFile(line);
+        }
+
+        /// <summary>Create the diag file on the main thread before background work writes it.</summary>
+        public static void EnsureFile()
+        {
+            if (!string.IsNullOrEmpty(_logPath)) return;
+            try
+            {
+                _logPath = Path.Combine(Application.persistentDataPath, "takxr-diag.log");
+                Directory.CreateDirectory(Path.GetDirectoryName(_logPath) ?? Application.persistentDataPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[TakConn] diag path: " + ex.Message);
+            }
+            try
+            {
+                string ext = "/sdcard/takxr";
+                Directory.CreateDirectory(ext);
+                _externalLogPath = Path.Combine(ext, "takxr-diag.log");
+            }
+            catch
+            {
+                _externalLogPath = null;
+            }
+        }
+
+        static void AppendFile(string line)
+        {
+            EnsureFile();
+            string stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+            string row = stamp + " " + line + "\n";
+            WriteRow(_logPath, row);
+            if (!string.IsNullOrEmpty(_externalLogPath))
+                WriteRow(_externalLogPath, row);
+        }
+
+        static void WriteRow(string path, string row)
+        {
+            if (string.IsNullOrEmpty(path)) return;
+            try
+            {
+                var info = new FileInfo(path);
+                if (info.Exists && info.Length > 400_000)
+                {
+                    string keep = File.ReadAllText(path);
+                    if (keep.Length > 180_000)
+                        keep = keep.Substring(keep.Length - 180_000);
+                    File.WriteAllText(path, keep);
+                }
+                File.AppendAllText(path, row);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[TakConn] diag write " + path + ": " + ex.Message);
+            }
         }
 
         public static List<Entry> Snapshot(int max = 20)

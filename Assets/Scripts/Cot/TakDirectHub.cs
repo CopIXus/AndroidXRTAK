@@ -223,6 +223,7 @@ namespace TakXr.Cot
 
             if (_sessions.TryGetValue(serverId, out var existing) && existing != null)
             {
+                existing.BindServer(entry.id, entry.host, entry.cotPort > 0 ? entry.cotPort : 8089);
                 yield return existing.RestartClientRoutine();
                 yield break;
             }

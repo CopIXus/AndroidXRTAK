@@ -73,7 +73,7 @@ Before pushing to GitHub:
 git config core.hooksPath .githooks
 ```
 
-Per-server certs: Servers panel → **Import cert** (`persistentDataPath/tak-certs/pending.p12`). On-device P12 import is the supported enrollment path.
+Per-server certs: Servers → tap a row → **Edit** server, port, username, and password, then **Enroll**. **Scan QR** reads an ATAK enrollment code (`tak://…enroll`, or `Name,host,port,ssl,username,password`) and enrolls immediately. A bundled `takclient.p12` is only a fallback; a password mismatch is reported as a bad certificate password, not a tampered file.
 
 ## Build APK
 

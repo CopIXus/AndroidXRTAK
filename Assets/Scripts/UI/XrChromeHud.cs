@@ -270,8 +270,8 @@ namespace TakXr.UI
             XrUiFacing.DockTrayAnchor = _trayAnchor;
 
             const float dockH = 0.162f;
-            var dockFill = new Color(0.05f, 0.10f, 0.15f, 0.93f);
-            var dockRim = new Color(0.18f, 0.88f, 0.98f, 0.98f);
+            var dockFill = XrCurvedWidgets.MetalFill;
+            var dockRim = XrCurvedWidgets.MetalRim;
 
             // Curved Full Dock Plate (shown when expanded)
             _dockFullPlate = XrCurvedWidgets.CreateCurvedPanelPlate(
@@ -382,8 +382,8 @@ namespace TakXr.UI
         void BuildSlideArrowButton(float x)
         {
             XrCurvedWidgets.EvaluateArc(x, DockHalfSpan, DockArchY, DockWrapZ, out var pos, out var rot);
-            var cardFill = new Color(0.08f, 0.18f, 0.28f, 0.96f);
-            var cardBorder = new Color(0.22f, 0.78f, 0.96f, 0.88f);
+            var cardFill = new Color(0.14f, 0.16f, 0.20f, 0.96f);
+            var cardBorder = XrCurvedWidgets.MetalRim;
 
             _slideArrowBtn = XrCurvedWidgets.CreateRoundedButtonCard(
                 "Dock_slide_arrow", _dockRoot, new Vector2(0.084f, 0.128f), cardFill, cardBorder, 2998);
@@ -391,10 +391,10 @@ namespace TakXr.UI
             _slideArrowBtn.localRotation = rot;
 
             _slideArrowGlyph = XrText.MakeWithShadow("ArrowGlyph", _slideArrowBtn, new Vector3(0f, 0.015f, -0.005f),
-                "<", 0.0078f, new Color(0.35f, 0.95f, 1f, 1f),
+                "<", 0.0078f, new Color(0.93f, 0.95f, 0.97f, 1f),
                 TextAnchor.MiddleCenter, TextAlignment.Center, maxWidthM: 0.068f);
             _slideArrowSub = XrText.MakeWithShadow("ArrowSub", _slideArrowBtn, new Vector3(0f, -0.042f, -0.005f),
-                "TOOLS", 0.0025f, new Color(0.86f, 0.95f, 1f, 0.96f),
+                "TOOLS", 0.0025f, new Color(0.72f, 0.75f, 0.78f, 0.96f),
                 TextAnchor.MiddleCenter, TextAlignment.Center, maxWidthM: 0.072f);
 
             var col = _slideArrowBtn.gameObject.AddComponent<BoxCollider>();
@@ -413,8 +413,8 @@ namespace TakXr.UI
             XrCurvedWidgets.EvaluateArc(x, DockHalfSpan, DockArchY, DockWrapZ, out var arcPos, out var arcRot);
             _userBadgeRoot = XrCurvedWidgets.CreateRoundedButtonCard(
                 "UserBadgeUnderHamburger", _dockRoot, new Vector2(0.240f, 0.042f),
-                new Color(0.04f, 0.09f, 0.15f, 0.94f),
-                new Color(0.18f, 0.78f, 0.95f, 0.80f), 2997);
+                XrCurvedWidgets.MetalFill,
+                XrCurvedWidgets.MetalRim, 2997);
             _userBadgeRoot.localPosition = arcPos + new Vector3(0f, -0.106f, -0.004f);
             _userBadgeRoot.localRotation = arcRot;
 
@@ -503,15 +503,13 @@ namespace TakXr.UI
         {
             XrCurvedWidgets.EvaluateArc(x, DockHalfSpan, DockArchY, DockWrapZ, out var arcPos, out var arcRot);
 
-            // Match the Stitch curved dock reference:
-            // Standard slots = slate-teal rounded card with subtle cyan border;
-            // Rightmost Hamburger slot = rich accent card with glowing border.
+            // Brushed metal cards — steel rim; hamburger uses amber accent (not cyan).
             Color fillColor = isHamburgerSlot
-                ? new Color(0.24f, 0.11f, 0.14f, 0.96f)
-                : new Color(0.08f, 0.15f, 0.22f, 0.96f);
+                ? new Color(0.19f, 0.14f, 0.12f, 0.96f)
+                : new Color(0.14f, 0.16f, 0.20f, 0.96f);
             Color borderColor = isHamburgerSlot
-                ? new Color(0.95f, 0.34f, 0.36f, 0.92f)
-                : new Color(0.22f, 0.68f, 0.86f, 0.78f);
+                ? XrCurvedWidgets.MetalAccent
+                : XrCurvedWidgets.MetalRim;
 
             var root = XrCurvedWidgets.CreateRoundedButtonCard(
                 "Dock_" + id, parent, new Vector2(0.120f, 0.128f), fillColor, borderColor, 2998);
@@ -520,7 +518,7 @@ namespace TakXr.UI
 
             MakeIconQuad(root, iconName, 0.064f, new Vector3(0f, 0.018f, -0.004f));
             XrText.MakeWithShadow("Lbl", root, new Vector3(0f, -0.042f, -0.004f), label, 0.0027f,
-                isHamburgerSlot ? new Color(1f, 0.88f, 0.88f, 1f) : new Color(0.90f, 0.97f, 1f, 0.98f),
+                isHamburgerSlot ? new Color(1f, 0.92f, 0.86f, 1f) : new Color(0.93f, 0.95f, 0.97f, 0.98f),
                 maxWidthM: 0.108f);
 
             var col = root.gameObject.AddComponent<BoxCollider>();
@@ -534,11 +532,11 @@ namespace TakXr.UI
             _menuRoot = new GameObject("Menu").transform;
             _menuRoot.SetParent(transform, false);
 
-            // Curved 3D backing plate with neon cyan perimeter border
+            // Curved 3D metal backing plate (steel rim, graphite fill)
             XrCurvedWidgets.CreateCurvedPanelPlate(
                 "CurvedMenuPlate", _menuRoot, 1.28f, 0.88f,
-                new Color(0.04f, 0.09f, 0.15f, 0.95f),
-                new Color(0.18f, 0.88f, 0.98f, 0.98f),
+                XrCurvedWidgets.MetalFill,
+                XrCurvedWidgets.MetalRim,
                 archHeight: MenuArchY, depthWrap: MenuWrapZ, renderQueue: 2990);
 
             var header = XrText.MakeWithShadow("Header", _menuRoot, new Vector3(-0.56f, 0.37f, -0.015f),
@@ -1033,11 +1031,11 @@ namespace TakXr.UI
 
             bool isDanger = id == "alert" || id == "casevac" || id == "quit";
             Color fillCol = isDanger
-                ? new Color(0.24f, 0.10f, 0.13f, 0.96f)
-                : new Color(0.08f, 0.15f, 0.23f, 0.96f);
+                ? new Color(0.22f, 0.12f, 0.12f, 0.96f)
+                : new Color(0.14f, 0.16f, 0.20f, 0.96f);
             Color borderCol = isDanger
-                ? new Color(0.95f, 0.34f, 0.36f, 0.88f)
-                : new Color(0.20f, 0.72f, 0.92f, 0.82f);
+                ? new Color(0.77f, 0.36f, 0.37f, 0.92f)
+                : XrCurvedWidgets.MetalRim;
 
             var root = XrCurvedWidgets.CreateRoundedButtonCard(
                 "Tile_" + id, _menuPageRoot != null ? _menuPageRoot : _menuRoot,
@@ -1099,8 +1097,8 @@ namespace TakXr.UI
                 TextAnchor.MiddleCenter, TextAlignment.Center, maxWidthM: 0.80f);
             var plate = XrCurvedWidgets.CreateCurvedPanelPlate(
                 "ToastBg", _statusLabel.transform, 0.86f, 0.088f,
-                new Color(0.04f, 0.09f, 0.15f, 0.92f),
-                new Color(0.18f, 0.85f, 0.98f, 0.90f),
+                XrCurvedWidgets.MetalFill,
+                XrCurvedWidgets.MetalRim,
                 archHeight: 0.006f, depthWrap: 0.018f, renderQueue: 2995);
             plate.localPosition = new Vector3(0f, 0f, 0.006f);
             _statusPlate = plate;

@@ -4,16 +4,22 @@ using UnityEngine;
 namespace TakXr.UI
 {
     /// <summary>
-    /// Procedural curved 3D spatial UI geometry &amp; rounded glassmorphic card textures
-    /// matching the Stitch curved dock reference:
+    /// Procedural curved 3D spatial UI geometry &amp; brushed-metal card textures:
     /// - Parabolic Y-arch + cylindrical Z-wrap toward the viewer (`EvaluateArc`)
-    /// - Rounded-rectangle card textures with glowing cyan/red borders and subtle 3D inner bevels
-    /// - Curved 3D backing plates with extruded neon cyan perimeter rims
+    /// - Rounded-rectangle cards with steel rims, graphite fill, subtle bevel (web METAL palette)
+    /// - Curved 3D backing plates with metal perimeter rails (no neon cyan)
     /// </summary>
     public static class XrCurvedWidgets
     {
         static readonly Dictionary<string, Texture2D> CardTexCache = new Dictionary<string, Texture2D>();
         static readonly Dictionary<string, Material> CardMatCache = new Dictionary<string, Material>();
+
+        /// <summary>Cool steel rim (#9aa3ad) — shared with web dock chrome.</summary>
+        public static readonly Color MetalRim = new Color(0.604f, 0.639f, 0.678f, 0.96f);
+        /// <summary>Dark graphite plate fill.</summary>
+        public static readonly Color MetalFill = new Color(0.10f, 0.12f, 0.15f, 0.96f);
+        /// <summary>Amber active accent (#d4a574) — hamburger / selected only.</summary>
+        public static readonly Color MetalAccent = new Color(0.831f, 0.647f, 0.455f, 0.95f);
 
         /// <summary>
         /// Evaluates the curved dock/panel surface at horizontal offset <paramref name="x"/> (in meters):
@@ -48,8 +54,8 @@ namespace TakXr.UI
         }
 
         /// <summary>
-        /// Builds a 3D curved backing plate with a dark bevelled back-layer, main slate face,
-        /// and glowing neon cyan top &amp; bottom border rails following the parabolic arch.
+        /// Builds a 3D curved backing plate with a dark bevelled back-layer, graphite face,
+        /// and brushed-steel top &amp; bottom border rails following the parabolic arch.
         /// </summary>
         public static Transform CreateCurvedPanelPlate(
             string name,
@@ -79,7 +85,7 @@ namespace TakXr.UI
             depthMr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             depthMr.receiveShadows = false;
 
-            // 2. Main Curved Glassmorphic Face with glowing neon cyan perimeter border
+            // 2. Main curved metal face with steel perimeter border
             var faceGo = new GameObject("CurvedFace");
             faceGo.transform.SetParent(root, false);
             faceGo.transform.localPosition = new Vector3(0f, 0f, 0.004f);
@@ -234,14 +240,21 @@ namespace TakXr.UI
             float bx = borderFrac;
             float by = borderFrac * aspect;
 
-            // Subtle vertical gradient on the fill for a 3D glass look
-            Color topFill = Color.Lerp(fill, new Color(0.22f, 0.42f, 0.62f, fill.a), 0.16f);
-            Color botFill = Color.Lerp(fill, new Color(0.01f, 0.02f, 0.05f, fill.a), 0.22f);
+            // Graphite vertical gradient + brushed streaks; steel rim with top highlight bevel
+            Color topFill = Color.Lerp(fill, new Color(0.22f, 0.25f, 0.30f, fill.a), 0.22f);
+            Color botFill = Color.Lerp(fill, new Color(0.03f, 0.035f, 0.045f, fill.a), 0.35f);
+            Color rimHi = Color.Lerp(border, new Color(0.84f, 0.87f, 0.90f, border.a), 0.55f);
+            Color rimLo = Color.Lerp(border, new Color(0.20f, 0.22f, 0.25f, border.a), 0.45f);
 
             for (int y = 0; y < h; y++)
             {
                 float v = (y + 0.5f) / h;
                 Color rowFill = Color.Lerp(botFill, topFill, v);
+                // subtle brushed metal streak
+                float brush = 0.04f * Mathf.Sin(v * 140f) * Mathf.Sin(v * 37f + 1.7f);
+                rowFill.r = Mathf.Clamp01(rowFill.r + brush);
+                rowFill.g = Mathf.Clamp01(rowFill.g + brush);
+                rowFill.b = Mathf.Clamp01(rowFill.b + brush);
                 for (int x = 0; x < w; x++)
                 {
                     float u = (x + 0.5f) / w;
@@ -255,7 +268,6 @@ namespace TakXr.UI
                         continue;
                     }
 
-                    // Distance to inner border boundary
                     float idx = Mathf.Max(0f, Mathf.Abs(u - 0.5f) - (0.5f - rx - bx)) / Mathf.Max(rx, 1e-4f);
                     float idy = Mathf.Max(0f, Mathf.Abs(v - 0.5f) - (0.5f - ry - by)) / Mathf.Max(ry, 1e-4f);
                     float id = Mathf.Sqrt(idx * idx + idy * idy);
@@ -264,7 +276,17 @@ namespace TakXr.UI
                                 v < by || v > 1f - by;
 
                     float edgeAa = Mathf.Clamp01((1.0f - d) * 14f);
-                    Color c = edge ? border : rowFill;
+                    Color c;
+                    if (edge)
+                    {
+                        // Top of plate gets highlight, bottom gets shade (metal bevel)
+                        c = Color.Lerp(rimLo, rimHi, Mathf.Clamp01(v * 1.15f));
+                        c = Color.Lerp(c, border, 0.35f);
+                    }
+                    else
+                    {
+                        c = rowFill;
+                    }
                     c.a *= edgeAa;
                     px[y * w + x] = c;
                 }

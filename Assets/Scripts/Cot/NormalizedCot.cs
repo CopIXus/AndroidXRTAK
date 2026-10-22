@@ -226,15 +226,7 @@ namespace TakXr.Cot
                 ? contact.callsign
                 : (!string.IsNullOrEmpty(detail?.contactCallsign) ? detail.contactCallsign : uid);
 
-        public bool IsAirborne
-        {
-            get
-            {
-                if (string.IsNullOrEmpty(type)) return false;
-                var parts = type.Split('-');
-                return parts.Length >= 3 && parts[0] == "a" && parts[2] == "A";
-            }
-        }
+        public bool IsAirborne => CotClassifier.IsAircraftCot(this, out _);
 
         public bool IsChatMessage =>
             (!string.IsNullOrEmpty(type) && type.StartsWith("b-t-f")) ||

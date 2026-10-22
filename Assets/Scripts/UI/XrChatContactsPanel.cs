@@ -429,6 +429,7 @@ namespace TakXr.UI
                                  kind == MarkerKind.Observer ||
                                  kind == MarkerKind.AircraftFixed ||
                                  kind == MarkerKind.AircraftRotary ||
+                                 kind == MarkerKind.AircraftDrone ||
                                  (!string.IsNullOrEmpty(c.type) && c.type.StartsWith("a-"));
                 if (isContact) result.Add(c);
             }

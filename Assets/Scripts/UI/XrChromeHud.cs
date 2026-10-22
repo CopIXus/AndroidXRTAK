@@ -552,11 +552,11 @@ namespace TakXr.UI
 
             _menuPageLabel = XrText.MakeWithShadow("Page", _menuRoot, new Vector3(0f, -0.37f, -0.010f),
                 "", 0.0038f, new Color(0.84f, 0.95f, 1f, 0.98f));
-            AddHeaderIconBtn("page_prev", "pageup", -0.54f, -0.37f, () =>
+            AddHeaderTextBtn("page_prev", "<", -0.54f, -0.37f, () =>
             {
                 if (_menuPage > 0) { _menuPage--; RebuildMenuPage(); }
             });
-            AddHeaderIconBtn("page_next", "pagedown", 0.54f, -0.37f, () =>
+            AddHeaderTextBtn("page_next", ">", 0.54f, -0.37f, () =>
             {
                 int maxPage = Mathf.Max(0, (_toolCatalog.Count - 1) / MenuPageSize);
                 if (_menuPage < maxPage) { _menuPage++; RebuildMenuPage(); }
@@ -877,11 +877,32 @@ namespace TakXr.UI
             XrCurvedWidgets.EvaluateArc(x, MenuHalfSpan, MenuArchY, MenuWrapZ, out var arcOff, out var arcRot);
             var root = XrCurvedWidgets.CreateRoundedButtonCard(
                 "Hdr_" + id, _menuRoot, new Vector2(0.078f, 0.064f),
-                new Color(0.10f, 0.20f, 0.32f, 0.96f),
-                new Color(0.22f, 0.78f, 0.96f, 0.85f), 3000);
+                XrCurvedWidgets.MetalFill,
+                XrCurvedWidgets.MetalRim, 3000);
             root.localPosition = new Vector3(arcOff.x, y + arcOff.y * 0.4f, arcOff.z - 0.004f);
             root.localRotation = arcRot;
             MakeIconQuad(root, iconName, 0.046f, new Vector3(0f, 0f, -0.004f));
+            var col = root.gameObject.AddComponent<BoxCollider>();
+            col.size = new Vector3(0.086f, 0.075f, 0.08f);
+            col.isTrigger = true;
+            _buttons.Add(new ToolBtn { Root = root, OnClick = onClick, Id = id });
+        }
+
+        /// <summary>Metal chrome header button with a text glyph (menu page &lt; / &gt;).</summary>
+        void AddHeaderTextBtn(string id, string glyph, float x, float y, Action onClick)
+        {
+            XrCurvedWidgets.EvaluateArc(x, MenuHalfSpan, MenuArchY, MenuWrapZ, out var arcOff, out var arcRot);
+            var root = XrCurvedWidgets.CreateRoundedButtonCard(
+                "Hdr_" + id, _menuRoot, new Vector2(0.078f, 0.064f),
+                XrCurvedWidgets.MetalFill,
+                XrCurvedWidgets.MetalRim, 3000);
+            root.localPosition = new Vector3(arcOff.x, y + arcOff.y * 0.4f, arcOff.z - 0.004f);
+            root.localRotation = arcRot;
+            var tm = XrText.MakeWithShadow(
+                "Glyph", root, new Vector3(0f, 0.002f, -0.005f),
+                glyph, 0.0062f, new Color(0.94f, 0.96f, 0.98f, 1f),
+                TextAnchor.MiddleCenter, TextAlignment.Center, maxWidthM: 0.07f);
+            XrText.Sharpen(tm);
             var col = root.gameObject.AddComponent<BoxCollider>();
             col.size = new Vector3(0.086f, 0.075f, 0.08f);
             col.isTrigger = true;
@@ -1052,6 +1073,8 @@ namespace TakXr.UI
                 || label == "Point Drop" || label == "Close Tools" || label == "Import KML/CoT"
                 || label == "Geofence 3D" || label == "3D Overlays")
                 display = label.Replace(" ", "\n");
+            // Restored prior tile label sizing — the dark plate + larger glyphs
+            // crushed readability under XR MSAA / autofit.
             XrText.MakeWithShadow("Label", root, new Vector3(0f, -0.044f, -0.005f), display,
                 0.0028f, new Color(0.94f, 0.98f, 1f, 0.98f * alpha), maxWidthM: TileW - 0.028f);
 
@@ -1262,6 +1285,7 @@ namespace TakXr.UI
             bool connected = (direct != null && direct.IsConnected) || _takConnected;
             int totalTracks = feed != null ? feed.Cots.Count : 0;
             int shown3D = cotLayer != null ? cotLayer.VisibleMarkerCount : 0;
+            int clusters = cotLayer != null ? cotLayer.VisibleClusterCount : 0;
             string netStr = connected ? "TAK ONLINE" : (direct != null ? direct.State.ToUpperInvariant() : "LOCAL");
             string activeTool = "";
             if (drawTool != null && drawTool.ActiveMode != XrDrawTool.Mode.None)
@@ -1271,7 +1295,7 @@ namespace TakXr.UI
 
             string line1 = $"HDG {h:000}° {cardinal}   ·   EARTH {tiltStr}°";
             string line2 = $"{lat:F5},  {lon:F5}   ·   ALT {Mathf.RoundToInt(altM)} m";
-            string line3 = $"{netStr}   ·   CoTs {shown3D}/{totalTracks}{activeTool}";
+            string line3 = $"{netStr}   ·   CoTs {shown3D} shown / {clusters} clusters / {totalTracks} tracks{activeTool}";
             string key = line1 + "|" + line2 + "|" + line3;
             if (key == _lastTelem) return;
             _lastTelem = key;

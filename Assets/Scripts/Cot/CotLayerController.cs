@@ -19,12 +19,13 @@ namespace TakXr.Cot
         const float FallbackClearanceM = 6f;
         // Angular separation (degrees) below which callsigns are treated as overlapping.
         const float LabelCrowdAngleDeg = 1.6f;
-        const int LabelAvoidEveryNFrames = 2;
+        const int LabelAvoidEveryNFrames = 4;
         // Cap stack so labels don't climb into the sky and hide ground pins.
         const int MaxLabelStack = 4;
         const float MaxStackWorldM = 55f;
         // Re-evaluate clustering when the viewer moves this far (metres).
         const float ClusterRecheckMoveM = 400f;
+        const int MarkerPoolMax = 256;
 
         [SerializeField] AppConfig config;
         [SerializeField] CotFeedClient feed;
@@ -37,9 +38,12 @@ namespace TakXr.Cot
         readonly Dictionary<string, GameObject> _clusters = new Dictionary<string, GameObject>();
         readonly HashSet<string> _clusteredUids = new HashSet<string>();
         readonly HashSet<string> _hiddenUids = new HashSet<string>();
+        readonly Stack<CotMarkerView> _markerPool = new Stack<CotMarkerView>(64);
         readonly List<CotMarkerView> _labelScratch = new List<CotMarkerView>(128);
         readonly List<int> _stackScratch = new List<int>(128);
         readonly List<bool> _crowdScratch = new List<bool>(128);
+        readonly Dictionary<long, List<int>> _crowdBuckets = new Dictionary<long, List<int>>(64);
+        readonly List<List<int>> _crowdBucketPool = new List<List<int>>(64);
         GeoMath.Geodetic _origin;
         bool _dirty = true;
         float _nextForceSync;
@@ -82,6 +86,7 @@ namespace TakXr.Cot
             {
                 case MarkerKind.AircraftFixed:
                 case MarkerKind.AircraftRotary:
+                case MarkerKind.AircraftDrone:
                     return ShowAircraft;
                 case MarkerKind.Video:
                     return ShowVideo;
@@ -232,6 +237,10 @@ namespace TakXr.Cot
         }
 
         public int VisibleMarkerCount => _markers.Count;
+        /// <summary>Number of geo-cluster bubbles currently drawn.</summary>
+        public int VisibleClusterCount => _clusters.Count;
+        /// <summary>Tracks collapsed into cluster bubbles (not individually drawn).</summary>
+        public int ClusteredTrackCount => _clusteredUids.Count;
 
         /// <summary>World positions of currently visible markers (for Fit tracks).</summary>
         public void CollectVisibleWorldPositions(List<Vector3> into)
@@ -275,8 +284,7 @@ namespace TakXr.Cot
             }
 
             if (xrCamera == null) return;
-            foreach (var kv in _markers)
-                kv.Value.FaceCamera(xrCamera.transform);
+            // CotMarkerView.LateUpdate already faces the camera — only update cluster counts.
             foreach (var kv in _clusters)
             {
                 if (kv.Value == null) continue;
@@ -382,8 +390,7 @@ namespace TakXr.Cot
             foreach (var uid in new List<string>(_markers.Keys))
             {
                 if (keep.Contains(uid)) continue;
-                Destroy(_markers[uid].gameObject);
-                _markers.Remove(uid);
+                RetireMarker(uid);
             }
 
             _clusteredUids.Clear();
@@ -444,9 +451,7 @@ namespace TakXr.Cot
 
             if (!_markers.TryGetValue(cot.uid, out var view))
             {
-                var go = new GameObject($"COT:{cot.Callsign}");
-                go.transform.SetParent(markersRoot, false);
-                view = go.AddComponent<CotMarkerView>();
+                view = AcquireMarker(cot.Callsign);
                 _markers[cot.uid] = view;
             }
 
@@ -461,9 +466,40 @@ namespace TakXr.Cot
             view.Bind(cot, config, xrCamera != null ? xrCamera.transform : null);
         }
 
+        CotMarkerView AcquireMarker(string callsign)
+        {
+            CotMarkerView view;
+            if (_markerPool.Count > 0)
+            {
+                view = _markerPool.Pop();
+                view.gameObject.SetActive(true);
+                view.gameObject.name = $"COT:{callsign}";
+            }
+            else
+            {
+                var go = new GameObject($"COT:{callsign}");
+                go.transform.SetParent(markersRoot, false);
+                view = go.AddComponent<CotMarkerView>();
+            }
+            return view;
+        }
+
+        void RetireMarker(string uid)
+        {
+            if (!_markers.TryGetValue(uid, out var view)) return;
+            _markers.Remove(uid);
+            if (view == null) return;
+            view.PrepareForPool();
+            view.gameObject.SetActive(false);
+            if (_markerPool.Count < MarkerPoolMax)
+                _markerPool.Push(view);
+            else
+                Destroy(view.gameObject);
+        }
+
         /// <summary>
-        /// Cheap O(n²) callsign stacking: when markers crowd in camera angular
-        /// space, push lower-priority labels upward (with a light lateral spiral).
+        /// Angular-grid callsign stacking: bucket markers by camera azimuth/elevation
+        /// so only nearby angular neighbors are compared (avoids full O(n²)).
         /// Ground glyphs NEVER move — CotMarkerView draws a leader line from the
         /// pin to the offset label so clusters still show map positions.
         /// </summary>
@@ -477,12 +513,12 @@ namespace TakXr.Cot
             }
             int n = _labelScratch.Count;
             if (n == 0) return;
+            if (xrCamera == null) return;
 
             _labelScratch.Sort((a, b) =>
             {
                 int c = b.LabelPriority.CompareTo(a.LabelPriority);
                 if (c != 0) return c;
-                // Closer to camera wins when priority ties.
                 float da = (a.transform.position - xrCamera.transform.position).sqrMagnitude;
                 float db = (b.transform.position - xrCamera.transform.position).sqrMagnitude;
                 return da.CompareTo(db);
@@ -496,8 +532,39 @@ namespace TakXr.Cot
                 _crowdScratch.Add(false);
             }
 
+            // Recycle bucket lists.
+            foreach (var kv in _crowdBuckets)
+            {
+                kv.Value.Clear();
+                _crowdBucketPool.Add(kv.Value);
+            }
+            _crowdBuckets.Clear();
+
             var camPos = xrCamera.transform.position;
+            float cellDeg = LabelCrowdAngleDeg;
             float cosThresh = Mathf.Cos(LabelCrowdAngleDeg * Mathf.Deg2Rad);
+
+            for (int i = 0; i < n; i++)
+            {
+                var dir = _labelScratch[i].LabelAnchorWorld - camPos;
+                if (dir.sqrMagnitude < 1e-6f) continue;
+                dir.Normalize();
+                float az = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
+                float el = Mathf.Asin(Mathf.Clamp(dir.y, -1f, 1f)) * Mathf.Rad2Deg;
+                int azCell = Mathf.FloorToInt(az / cellDeg);
+                int elCell = Mathf.FloorToInt(el / cellDeg);
+                long key = ((long)azCell << 32) ^ (uint)elCell;
+                if (!_crowdBuckets.TryGetValue(key, out var list))
+                {
+                    list = _crowdBucketPool.Count > 0
+                        ? _crowdBucketPool[_crowdBucketPool.Count - 1]
+                        : new List<int>(8);
+                    if (_crowdBucketPool.Count > 0)
+                        _crowdBucketPool.RemoveAt(_crowdBucketPool.Count - 1);
+                    _crowdBuckets[key] = list;
+                }
+                list.Add(i);
+            }
 
             for (int i = 0; i < n; i++)
             {
@@ -506,23 +573,33 @@ namespace TakXr.Cot
                 float magA = dirA.magnitude;
                 if (magA < 1e-3f) continue;
                 dirA /= magA;
+                float az = Mathf.Atan2(dirA.x, dirA.z) * Mathf.Rad2Deg;
+                float el = Mathf.Asin(Mathf.Clamp(dirA.y, -1f, 1f)) * Mathf.Rad2Deg;
+                int azCell = Mathf.FloorToInt(az / cellDeg);
+                int elCell = Mathf.FloorToInt(el / cellDeg);
 
                 int stack = 0;
-                for (int j = 0; j < i; j++)
+                for (int daz = -1; daz <= 1; daz++)
+                for (int del = -1; del <= 1; del++)
                 {
-                    var b = _labelScratch[j];
-                    var dirB = b.LabelAnchorWorld - camPos;
-                    float magB = dirB.magnitude;
-                    if (magB < 1e-3f) continue;
-                    dirB /= magB;
-                    if (Vector3.Dot(dirA, dirB) < cosThresh) continue;
-                    // Same angular cluster — sit above the higher-priority label's stack.
-                    stack = Mathf.Max(stack, _stackScratch[j] + 1);
-                    // Both ends of the pair are grouped (incl. the stack-0 leader)
-                    // — they render at reduced scale so the pile stays readable.
-                    _crowdScratch[i] = true;
-                    _crowdScratch[j] = true;
+                    long key = ((long)(azCell + daz) << 32) ^ (uint)(elCell + del);
+                    if (!_crowdBuckets.TryGetValue(key, out var neighbors)) continue;
+                    for (int ni = 0; ni < neighbors.Count; ni++)
+                    {
+                        int j = neighbors[ni];
+                        if (j >= i) continue; // only higher-priority / earlier indices
+                        var b = _labelScratch[j];
+                        var dirB = b.LabelAnchorWorld - camPos;
+                        float magB = dirB.magnitude;
+                        if (magB < 1e-3f) continue;
+                        dirB /= magB;
+                        if (Vector3.Dot(dirA, dirB) < cosThresh) continue;
+                        stack = Mathf.Max(stack, _stackScratch[j] + 1);
+                        _crowdScratch[i] = true;
+                        _crowdScratch[j] = true;
+                    }
                 }
+
                 stack = Mathf.Min(stack, MaxLabelStack);
                 _stackScratch[i] = stack;
 
@@ -532,7 +609,6 @@ namespace TakXr.Cot
                     continue;
                 }
 
-                // Modest spacing — prefer short stacks + leader lines over sky columns.
                 float spacing = Mathf.Max(a.LabelWorldHeight * 1.05f, magA * 0.012f);
                 spacing = Mathf.Min(spacing, 18f);
                 float lateral = spacing * 0.4f * Mathf.Sin(stack * 1.2f);
@@ -544,7 +620,6 @@ namespace TakXr.Cot
                 a.SetLabelAvoidanceOffset(a.transform.InverseTransformVector(worldOff));
             }
 
-            // Apply group shrink after both loop directions marked pairs.
             for (int i = 0; i < n; i++)
                 _labelScratch[i].SetCrowded(_crowdScratch[i]);
         }

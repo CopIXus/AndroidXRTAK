@@ -14,10 +14,12 @@ namespace TakXr.Cot
         Dcfs,
         /// <summary>ATAK team member — colored team dot with heading, flat.</summary>
         TeamMember,
-        /// <summary>Fixed-wing aircraft — procedural silhouette, flat.</summary>
+        /// <summary>Fixed-wing aircraft — military jet or civilian airframe.</summary>
         AircraftFixed,
-        /// <summary>Rotary-wing aircraft — procedural silhouette, flat.</summary>
+        /// <summary>Rotary-wing aircraft — helicopter airframe.</summary>
         AircraftRotary,
+        /// <summary>UAS / drone — quadrotor-style airframe.</summary>
+        AircraftDrone,
         /// <summary>On-device iconset PNG (usericon path or explicit 2525b type match).</summary>
         LocalIcon,
         /// <summary>Remote http(s) iconUrl (backend/non-direct feeds only).</summary>
@@ -45,15 +47,24 @@ namespace TakXr.Cot
     ///   2. Video      — detail.video.url non-empty OR type starts "b-m-p-s-p-loc"
     ///                   (excluding VRTAK observers)
     ///   3. dCFS       — callsign matches /^dCFS:/i
-    ///   4. TeamMember — ATAK team name or contact endpoint present
-    ///   5. Aircraft   — third dash token of type == "A" (rotary when a later token == "H")
+    ///   4. Aircraft   — battle dimension "A" (before TeamMember: SA air tracks always have
+    ///                   endpoint/team and must render as planes/helis/drones, not unit balls)
+    ///   5. TeamMember — ATAK team name or contact endpoint present (ground SA)
     ///   6. LocalIcon  — on-device IconResolver PNG (usericon path / 2525b type), explicit only
     ///   7. RemoteIcon — absolute http(s) iconUrl
-    ///   8. Dot        — affiliation / marker-color dot
+    ///   8. Dot        — affiliation frame icon / marker-color fallback
     /// ==========================================================================
     /// </summary>
     public static class CotClassifier
     {
+        public enum AirframeStyle : byte
+        {
+            MilitaryFixed = 0,
+            CivilianFixed = 1,
+            Rotary = 2,
+            Drone = 3,
+        }
+
         /// <summary>
         /// Production classification: probes IconResolver for an explicit local icon.
         /// The IconResolver affiliation-DEFAULT fallback deliberately does NOT count
@@ -73,9 +84,15 @@ namespace TakXr.Cot
             if (IsObserverCot(cot)) return MarkerKind.Observer;
             if (IsVideoCot(cot)) return MarkerKind.Video;
             if (IsDcfsCot(cot)) return MarkerKind.Dcfs;
+            // Air battle dimension wins over team/endpoint so SA aircraft stay
+            // volumetric planes/helis/drones instead of collapsing to unit balls.
+            if (TryGetAirframeStyle(cot, out var airStyle))
+            {
+                if (airStyle == AirframeStyle.Drone) return MarkerKind.AircraftDrone;
+                if (airStyle == AirframeStyle.Rotary) return MarkerKind.AircraftRotary;
+                return MarkerKind.AircraftFixed;
+            }
             if (IsTeamMemberCot(cot)) return MarkerKind.TeamMember;
-            if (IsAircraftCot(cot, out bool rotary))
-                return rotary ? MarkerKind.AircraftRotary : MarkerKind.AircraftFixed;
             if (localIconAvailable) return MarkerKind.LocalIcon;
             if (!string.IsNullOrEmpty(cot.iconUrl)) return MarkerKind.RemoteIcon;
             return MarkerKind.Dot;
@@ -133,20 +150,43 @@ namespace TakXr.Cot
         public static bool IsAircraftCot(NormalizedCot cot, out bool rotary)
         {
             rotary = false;
+            if (!TryGetAirframeStyle(cot, out var style)) return false;
+            rotary = style == AirframeStyle.Rotary;
+            return true;
+        }
+
+        /// <summary>
+        /// Parse 2525-ish CoT type into an airframe style.
+        /// Tokens after battle-dim A: M=military, C=civilian, H=helicopter, Q=UAV/drone.
+        /// </summary>
+        public static bool TryGetAirframeStyle(NormalizedCot cot, out AirframeStyle style)
+        {
+            style = AirframeStyle.MilitaryFixed;
             if (string.IsNullOrEmpty(cot?.type)) return false;
             var parts = cot.type.Split('-');
             if (parts.Length < 3
                 || !string.Equals(parts[0], "a", System.StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(parts[2], "A", System.StringComparison.OrdinalIgnoreCase))
                 return false;
+
+            bool rotary = false;
+            bool drone = false;
+            bool civilian = false;
             for (int i = 3; i < parts.Length; i++)
             {
-                if (string.Equals(parts[i], "H", System.StringComparison.OrdinalIgnoreCase))
-                {
+                var t = parts[i];
+                if (string.Equals(t, "H", System.StringComparison.OrdinalIgnoreCase))
                     rotary = true;
-                    break;
-                }
+                else if (string.Equals(t, "Q", System.StringComparison.OrdinalIgnoreCase))
+                    drone = true; // 2525 UAV / drone function id
+                else if (i == 3 && string.Equals(t, "C", System.StringComparison.OrdinalIgnoreCase))
+                    civilian = true;
             }
+
+            // Prefer drone over rotary/fixed when Q/U is present (e.g. a-f-A-M-F-Q).
+            if (drone) { style = AirframeStyle.Drone; return true; }
+            if (rotary) { style = AirframeStyle.Rotary; return true; }
+            style = civilian ? AirframeStyle.CivilianFixed : AirframeStyle.MilitaryFixed;
             return true;
         }
 
@@ -251,9 +291,27 @@ namespace TakXr.Cot
                 },
                 new Case
                 {
-                    Name = "aircraft WITH endpoint → team dot wins (order 4 > 5)",
+                    Name = "drone / UAV (Q token)",
+                    Cot = Make(type: "a-f-A-M-F-Q"),
+                    Expected = MarkerKind.AircraftDrone,
+                },
+                new Case
+                {
+                    Name = "civilian fixed-wing (C after A)",
+                    Cot = Make(type: "a-f-A-C-F"),
+                    Expected = MarkerKind.AircraftFixed,
+                },
+                new Case
+                {
+                    Name = "aircraft WITH endpoint → aircraft wins (order air > team)",
                     Cot = Make(type: "a-f-A-M-H", endpoint: "*:-1:stcp"),
-                    Expected = MarkerKind.TeamMember,
+                    Expected = MarkerKind.AircraftRotary,
+                },
+                new Case
+                {
+                    Name = "aircraft WITH team → aircraft wins (order air > team)",
+                    Cot = Make(type: "a-f-A-M-F", team: "Cyan", endpoint: "*:-1:stcp"),
+                    Expected = MarkerKind.AircraftFixed,
                 },
                 new Case
                 {

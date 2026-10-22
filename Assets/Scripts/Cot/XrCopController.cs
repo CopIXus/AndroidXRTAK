@@ -223,6 +223,7 @@ namespace TakXr.Cot
             if (feed == null || !feed.Cots.TryGetValue(uid, out var cot) || cot == null)
                 return;
             _lastSelectedUid = uid;
+            CotMarkerView.ForceNearLodUid = uid;
             // ATAK-style: tap opens the radial coin menu; Details slice routes to the
             // info panel. Fall back to the panel when no radial menu is wired.
             if (radialMenu != null)

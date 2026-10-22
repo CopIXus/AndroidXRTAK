@@ -86,6 +86,32 @@ namespace TakXr.Cot
                 var em = new Color(color.r * emissionMul, color.g * emissionMul, color.b * emissionMul, 1f);
                 mat.SetColor("_EmissionColor", em);
             }
+            mat.enableInstancing = true;
+            mat.renderQueue = 2995;
+            MatCache[key] = mat;
+            return mat;
+        }
+
+        /// <summary>
+        /// Shared instanced lit material for mid/far LOD pins (single-sphere markers).
+        /// </summary>
+        public static Material GetInstancedPinMaterial(Color color)
+        {
+            string key = $"pin:{ColorUtility.ToHtmlStringRGBA(color)}";
+            if (MatCache.TryGetValue(key, out var mat) && mat != null)
+                return mat;
+
+            mat = new Material(LitShader);
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", color);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", color);
+            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.45f);
+            if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0.08f);
+            if (mat.HasProperty("_EmissionColor"))
+            {
+                mat.EnableKeyword("_EMISSION");
+                mat.SetColor("_EmissionColor", new Color(color.r * 0.22f, color.g * 0.22f, color.b * 0.22f, 1f));
+            }
+            mat.enableInstancing = true;
             mat.renderQueue = 2995;
             MatCache[key] = mat;
             return mat;
@@ -141,6 +167,23 @@ namespace TakXr.Cot
             mat.renderQueue = 3110;
             MatCache[key] = mat;
             return mat;
+        }
+
+        // ------------------------------------------------------------------
+        // 0. SIMPLE LOD PIN — mid/far distance (single shared sphere)
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// One-draw-call team-colored sphere for mid/far LOD. No ring, stem, or course cone.
+        /// </summary>
+        public static Transform BuildSimplePin(Transform parent, Color color, float localScale = 0.55f)
+        {
+            var root = new GameObject("Pin3D").transform;
+            root.SetParent(parent, false);
+            CreateMeshPart("PinSphere", root, GetSphereMesh(),
+                GetInstancedPinMaterial(color),
+                Vector3.zero, Quaternion.identity, Vector3.one * Mathf.Max(0.2f, localScale));
+            return root;
         }
 
         // ------------------------------------------------------------------
@@ -234,6 +277,134 @@ namespace TakXr.Cot
                 GetTranslucentMaterial(new Color(color.r, color.g, color.b, 0.55f)),
                 new Vector3(0f, -0.22f, 0f), Quaternion.identity, new Vector3(0.62f, 0.03f, 0.62f));
 
+            return root;
+        }
+
+        /// <summary>
+        /// Civilian airliner-style fixed wing: straight wings, single tube fuselage,
+        /// no twin under-wing military nacelles / swept-jet silhouette.
+        /// </summary>
+        public static Transform BuildCivilianAirplane(Transform parent, Color color, float courseDeg)
+        {
+            var root = new GameObject("Airliner3D").transform;
+            root.SetParent(parent, false);
+
+            float yaw = (!float.IsNaN(courseDeg) && courseDeg >= 0f) ? courseDeg : 0f;
+            var airframe = new GameObject("Airframe").transform;
+            airframe.SetParent(root, false);
+            airframe.localRotation = Quaternion.Euler(0f, yaw, 0f);
+
+            var bodyMat = GetLitMaterial(color, smoothness: 0.55f, metallic: 0.12f, emissionMul: 0.22f);
+            var wingMat = GetLitMaterial(Color.Lerp(color, Color.white, 0.35f), 0.5f, 0.08f, 0.18f);
+            var windowMat = GetLitMaterial(new Color(0.12f, 0.20f, 0.32f, 1f), 0.9f, 0.2f, 0.15f);
+            var engMat = GetLitMaterial(new Color(0.55f, 0.58f, 0.62f, 1f), 0.45f, 0.25f, 0.12f);
+
+            // Tube fuselage
+            CreateMeshPart("Fuselage", airframe, GetCylinderMesh(), bodyMat,
+                new Vector3(0f, 0f, 0f), Quaternion.Euler(90f, 0f, 0f), new Vector3(0.16f, 0.55f, 0.16f));
+            // Nose / cockpit
+            CreateMeshPart("Nose", airframe, GetSphereMesh(), bodyMat,
+                new Vector3(0f, 0f, 0.48f), Quaternion.identity, new Vector3(0.15f, 0.14f, 0.22f));
+            CreateMeshPart("CockpitGlass", airframe, GetSphereMesh(), windowMat,
+                new Vector3(0f, 0.04f, 0.42f), Quaternion.identity, new Vector3(0.12f, 0.08f, 0.14f));
+            // Straight high wings (airliner)
+            CreateMeshPart("WingL", airframe, GetCubeMesh(), wingMat,
+                new Vector3(-0.38f, 0.02f, 0.02f), Quaternion.identity, new Vector3(0.55f, 0.03f, 0.16f));
+            CreateMeshPart("WingR", airframe, GetCubeMesh(), wingMat,
+                new Vector3(0.38f, 0.02f, 0.02f), Quaternion.identity, new Vector3(0.55f, 0.03f, 0.16f));
+            // Under-wing turbofan pods (civilian look)
+            CreateMeshPart("EngL", airframe, GetCylinderMesh(), engMat,
+                new Vector3(-0.28f, -0.08f, 0.02f), Quaternion.Euler(90f, 0f, 0f), new Vector3(0.08f, 0.14f, 0.08f));
+            CreateMeshPart("EngR", airframe, GetCylinderMesh(), engMat,
+                new Vector3(0.28f, -0.08f, 0.02f), Quaternion.Euler(90f, 0f, 0f), new Vector3(0.08f, 0.14f, 0.08f));
+            // Tailplane + vertical fin
+            CreateMeshPart("HStab", airframe, GetCubeMesh(), wingMat,
+                new Vector3(0f, 0.06f, -0.42f), Quaternion.identity, new Vector3(0.36f, 0.025f, 0.10f));
+            CreateMeshPart("VStab", airframe, GetCubeMesh(), bodyMat,
+                new Vector3(0f, 0.16f, -0.42f), Quaternion.identity, new Vector3(0.03f, 0.22f, 0.14f));
+
+            CreateMeshPart("AirRing", root, GetRingMesh(),
+                GetTranslucentMaterial(new Color(color.r, color.g, color.b, 0.45f)),
+                new Vector3(0f, -0.22f, 0f), Quaternion.identity, new Vector3(0.62f, 0.03f, 0.62f));
+            return root;
+        }
+
+        /// <summary>Quadrotor drone: central body + 4 arms with rotor discs.</summary>
+        public static Transform BuildQuadcopterDrone(Transform parent, Color color, float courseDeg)
+        {
+            var root = new GameObject("Drone3D").transform;
+            root.SetParent(parent, false);
+
+            float yaw = (!float.IsNaN(courseDeg) && courseDeg >= 0f) ? courseDeg : 0f;
+            var airframe = new GameObject("Airframe").transform;
+            airframe.SetParent(root, false);
+            airframe.localRotation = Quaternion.Euler(0f, yaw, 0f);
+
+            var bodyMat = GetLitMaterial(color, 0.55f, 0.2f, 0.28f);
+            var armMat = GetLitMaterial(new Color(0.12f, 0.14f, 0.16f, 1f), 0.4f, 0.3f, 0.15f);
+            var rotorMat = GetTranslucentMaterial(new Color(color.r, color.g, color.b, 0.35f));
+
+            CreateMeshPart("Body", airframe, GetCubeMesh(), bodyMat,
+                Vector3.zero, Quaternion.identity, new Vector3(0.22f, 0.10f, 0.28f));
+            CreateMeshPart("CameraGimbal", airframe, GetSphereMesh(),
+                GetLitMaterial(new Color(0.2f, 0.22f, 0.26f, 1f), 0.7f, 0.2f, 0.1f),
+                new Vector3(0f, -0.10f, 0.06f), Quaternion.identity, new Vector3(0.10f, 0.10f, 0.10f));
+
+            float arm = 0.32f;
+            var corners = new[]
+            {
+                new Vector3(-arm, 0.04f, arm),
+                new Vector3(arm, 0.04f, arm),
+                new Vector3(-arm, 0.04f, -arm),
+                new Vector3(arm, 0.04f, -arm),
+            };
+            for (int i = 0; i < corners.Length; i++)
+            {
+                var p = corners[i];
+                CreateMeshPart("Arm" + i, airframe, GetCubeMesh(), armMat,
+                    p * 0.5f, Quaternion.LookRotation(p.normalized, Vector3.up),
+                    new Vector3(0.05f, 0.04f, 0.36f));
+                CreateMeshPart("Motor" + i, airframe, GetCylinderMesh(), armMat,
+                    p, Quaternion.identity, new Vector3(0.07f, 0.04f, 0.07f));
+                CreateMeshPart("Rotor" + i, airframe, GetCylinderMesh(), rotorMat,
+                    p + Vector3.up * 0.04f, Quaternion.identity, new Vector3(0.22f, 0.008f, 0.22f));
+            }
+
+            CreateMeshPart("AirRing", root, GetRingMesh(),
+                GetTranslucentMaterial(new Color(color.r, color.g, color.b, 0.4f)),
+                new Vector3(0f, -0.20f, 0f), Quaternion.identity, new Vector3(0.55f, 0.03f, 0.55f));
+            return root;
+        }
+
+        /// <summary>Compact mid/far LOD air silhouette (keeps air tracks readable vs ground pins).</summary>
+        public static Transform BuildSimpleAirPin(Transform parent, Color color, bool rotary, bool drone)
+        {
+            var root = new GameObject("AirPin3D").transform;
+            root.SetParent(parent, false);
+            var mat = GetInstancedPinMaterial(color);
+            if (drone)
+            {
+                CreateMeshPart("Core", root, GetCubeMesh(), mat,
+                    Vector3.zero, Quaternion.identity, new Vector3(0.28f, 0.12f, 0.28f));
+                CreateMeshPart("Disc", root, GetCylinderMesh(),
+                    GetTranslucentMaterial(new Color(color.r, color.g, color.b, 0.4f)),
+                    new Vector3(0f, 0.06f, 0f), Quaternion.identity, new Vector3(0.55f, 0.02f, 0.55f));
+            }
+            else if (rotary)
+            {
+                CreateMeshPart("Cabin", root, GetSphereMesh(), mat,
+                    Vector3.zero, Quaternion.identity, new Vector3(0.35f, 0.28f, 0.42f));
+                CreateMeshPart("Rotor", root, GetCylinderMesh(),
+                    GetTranslucentMaterial(new Color(1f, 1f, 1f, 0.35f)),
+                    new Vector3(0f, 0.22f, 0f), Quaternion.identity, new Vector3(0.7f, 0.02f, 0.7f));
+            }
+            else
+            {
+                CreateMeshPart("Fuse", root, GetCylinderMesh(), mat,
+                    Vector3.zero, Quaternion.Euler(90f, 0f, 0f), new Vector3(0.14f, 0.4f, 0.14f));
+                CreateMeshPart("Wings", root, GetCubeMesh(), mat,
+                    Vector3.zero, Quaternion.identity, new Vector3(0.7f, 0.04f, 0.16f));
+            }
             return root;
         }
 
@@ -399,21 +570,26 @@ namespace TakXr.Cot
         ///   (front face, back face, and 3D extruded depth sidewalls) so the icon
         ///   has real 3D thickness and volume from any angle in XR.
         /// </summary>
-        public static Transform BuildExtrudedIconObject(Transform parent, Texture2D iconTex, Color frameColor, float courseDeg = float.NaN)
+        public static Transform BuildExtrudedIconObject(Transform parent, Texture2D iconTex, Color frameColor,
+            float courseDeg = float.NaN, bool includeBaseBall = true)
         {
             var root = new GameObject("Icon3D").transform;
             root.SetParent(parent, false);
 
-            // 1. 3D spherical base core ("ball" foundation) so from any angle (incl. nadir)
-            //    the marker has solid 3D presence on the map.
-            CreateMeshPart("BaseBall", root, GetSphereMesh(),
-                GetLitMaterial(new Color(0.10f, 0.14f, 0.20f, 1f), 0.65f, 0.25f, 0.18f),
-                Vector3.zero, Quaternion.identity, new Vector3(0.66f, 0.66f, 0.32f));
+            // 1. Optional spherical base — omit for affiliation frames (square/diamond/circle)
+            //    so the 2525 shape silhouette is the dominant silhouette.
+            if (includeBaseBall)
+            {
+                CreateMeshPart("BaseBall", root, GetSphereMesh(),
+                    GetLitMaterial(new Color(0.10f, 0.14f, 0.20f, 1f), 0.65f, 0.25f, 0.18f),
+                    Vector3.zero, Quaternion.identity, new Vector3(0.66f, 0.66f, 0.32f));
+            }
 
             // 2. 3D metallic affiliation/team outer torus ring framing the icon
             CreateMeshPart("FrameRing", root, GetRingMesh(),
                 GetLitMaterial(frameColor, 0.72f, 0.25f, 0.38f),
-                Vector3.zero, Quaternion.Euler(90f, 0f, 0f), new Vector3(0.74f, 0.11f, 0.74f));
+                Vector3.zero, Quaternion.Euler(90f, 0f, 0f),
+                includeBaseBall ? new Vector3(0.74f, 0.11f, 0.74f) : new Vector3(0.82f, 0.10f, 0.82f));
 
             // 3. 3D extruded icon relief mesh (front + back + 3D extruded perimeter walls)
             if (iconTex != null)
@@ -422,7 +598,8 @@ namespace TakXr.Cot
                 var reliefGo = new GameObject("ExtrudedRelief");
                 reliefGo.transform.SetParent(root, false);
                 reliefGo.transform.localPosition = Vector3.zero;
-                reliefGo.transform.localScale = new Vector3(0.58f, 0.58f, 1f);
+                float reliefScale = includeBaseBall ? 0.58f : 0.78f;
+                reliefGo.transform.localScale = new Vector3(reliefScale, reliefScale, 1f);
 
                 var mf = reliefGo.AddComponent<MeshFilter>();
                 mf.sharedMesh = reliefMesh;

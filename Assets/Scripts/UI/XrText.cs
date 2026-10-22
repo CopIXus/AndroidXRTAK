@@ -2,6 +2,7 @@ using UnityEngine;
 
 #if UNITY_TEXTMESHPRO || TMP_PRESENT
 using TMPro;
+using UnityEngine.TextCore.LowLevel;
 #endif
 
 namespace TakXr.UI
@@ -23,6 +24,8 @@ namespace TakXr.UI
         /// (bitmap fonts stay soft if the atlas is undersampled).
         /// </summary>
         public const int CrispFontSize = 384;
+        /// <summary>Base TMP point size for world callsigns before distance scale.</summary>
+        public const float WorldTmpBaseFontSize = 36f;
         const float LegacyFontSize = 64f;
         const string PrefetchGlyphs =
             " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" +
@@ -32,6 +35,7 @@ namespace TakXr.UI
         static bool _glyphsWarmed;
 #if UNITY_TEXTMESHPRO || TMP_PRESENT
         static TMP_FontAsset _tmpFont;
+        static bool _tmpFontFailed;
 #endif
 
         public static Font SharedFont
@@ -50,6 +54,120 @@ namespace TakXr.UI
         }
 
         public static void ForceBilinear(Font font) => ForceCrispFiltering(font);
+
+#if UNITY_TEXTMESHPRO || TMP_PRESENT
+        /// <summary>True when a runtime SDF font was created successfully.</summary>
+        public static bool HasTmpFont => EnsureTmpFont() != null;
+
+        /// <summary>
+        /// World-space SDF callsign / marker text. Scales cleanly at any distance;
+        /// uses a dark outline instead of a second TextMesh shadow + plate.
+        /// </summary>
+        public static TMP_Text MakeWorldTmp(
+            string name,
+            Transform parent,
+            Vector3 localPos,
+            string msg,
+            Color color,
+            TextAlignmentOptions alignment = TextAlignmentOptions.Bottom)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale = Vector3.one;
+
+            var tmp = go.AddComponent<TextMeshPro>();
+            tmp.font = EnsureTmpFont();
+            tmp.text = msg ?? "";
+            tmp.color = color;
+            tmp.fontSize = WorldTmpBaseFontSize;
+            tmp.alignment = alignment;
+            tmp.enableWordWrapping = false;
+            tmp.overflowMode = TextOverflowModes.Overflow;
+            tmp.richText = false;
+            tmp.raycastTarget = false;
+            tmp.outlineWidth = 0.22f;
+            tmp.outlineColor = new Color32(0, 0, 0, 230);
+            if (tmp.fontMaterial != null)
+            {
+                tmp.fontMaterial.EnableKeyword("OUTLINE_ON");
+                tmp.fontMaterial.renderQueue = 3002;
+            }
+            var r = tmp.renderer;
+            if (r != null)
+            {
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                r.receiveShadows = false;
+            }
+            return tmp;
+        }
+
+        /// <summary>
+        /// Scale a world TMP so its preferred height matches <paramref name="worldHeightM"/>.
+        /// </summary>
+        public static void SetWorldTmpHeight(TMP_Text tmp, float worldHeightM)
+        {
+            if (tmp == null) return;
+            // TMP Essential Resources (TMP Settings) are required; without them
+            // GetPreferredValues throws NullReferenceException on style sheet.
+            if (TMP_Settings.instance == null)
+            {
+                tmp.fontSize = Mathf.Max(0.01f, worldHeightM);
+                tmp.transform.localScale = Vector3.one;
+                return;
+            }
+            tmp.fontSize = WorldTmpBaseFontSize;
+            try
+            {
+                if (!string.IsNullOrEmpty(tmp.text))
+                {
+                    var pref = tmp.GetPreferredValues(tmp.text);
+                    if (pref.y > 1e-4f)
+                    {
+                        float scale = Mathf.Max(1e-4f, worldHeightM / pref.y);
+                        tmp.transform.localScale = new Vector3(scale, scale, scale);
+                        return;
+                    }
+                }
+            }
+            catch (System.Exception)
+            {
+                /* fall through */
+            }
+            tmp.fontSize = Mathf.Max(0.01f, worldHeightM);
+            tmp.transform.localScale = Vector3.one;
+        }
+
+        static TMP_FontAsset EnsureTmpFont()
+        {
+            if (_tmpFont != null) return _tmpFont;
+            if (_tmpFontFailed) return null;
+            try
+            {
+                var src = SharedFont;
+                if (src == null)
+                {
+                    _tmpFontFailed = true;
+                    return null;
+                }
+                _tmpFont = TMP_FontAsset.CreateFontAsset(
+                    src, 90, 9, GlyphRenderMode.SDFAA, 1024, 1024,
+                    AtlasPopulationMode.Dynamic, true);
+                if (_tmpFont == null)
+                {
+                    _tmpFontFailed = true;
+                    Debug.LogWarning("[XrText] TMP_FontAsset.CreateFontAsset returned null.");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                _tmpFontFailed = true;
+                Debug.LogWarning("[XrText] TMP font create failed: " + ex.Message);
+            }
+            return _tmpFont;
+        }
+#endif
 
         /// <summary>
         /// Keep the dynamic font atlas on high-quality filtering so menu and CoT

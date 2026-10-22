@@ -5,7 +5,8 @@
     "Unity.InputSystem",
     "Unity.XR.CoreUtils",
     "Unity.XR.Management",
-    "Unity.XR.Hands"
+    "Unity.XR.Hands",
+    "Unity.TextMeshPro"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
@@ -24,6 +25,11 @@
       "name": "com.unity.xr.hands",
       "expression": "",
       "define": "TAKXR_HAS_XR_HANDS"
+    },
+    {
+      "name": "com.unity.ugui",
+      "expression": "2.0.0",
+      "define": "UNITY_TEXTMESHPRO"
     }
   ],
   "noEngineReferences": false

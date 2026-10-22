@@ -16,6 +16,10 @@ namespace TakXr.Core
         public int cotPort = 8089;
         public int martiPort = 8443;
         public int enrollPort = 8446;
+        /// <summary>TAK enrollment username. Required to enroll a client certificate.</summary>
+        public string username;
+        /// <summary>TAK enrollment password. Stored with the server entry so it can be edited and re-used.</summary>
+        public string password;
         public string note;
         /// <summary>Optional display-only: last known cert status label.</summary>
         public string certNote;

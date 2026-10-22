@@ -61,14 +61,17 @@ namespace TakXr.UI
             _root.SetParent(transform, false);
             _root.gameObject.SetActive(false);
 
-            Quad("Bg", _root, new Vector3(0f, 0f, 0.01f), new Vector2(PanelW, 0.72f),
-                new Color(0.05f, 0.10f, 0.16f, 0.96f), 2995);
+            XrCurvedWidgets.CreateCurvedPanelPlate(
+                "CurvedBg", _root, PanelW, 0.72f,
+                new Color(0.04f, 0.09f, 0.15f, 0.96f),
+                new Color(0.18f, 0.88f, 0.98f, 0.96f),
+                archHeight: 0.010f, depthWrap: 0.032f, renderQueue: 2995);
 
-            _title = Text("Title", _root, new Vector3(0f, 0.315f, -0.01f), "CHANNELS", 0.011f,
-                new Color(0.85f, 0.95f, 1f, 1f));
+            _title = Text("Title", _root, new Vector3(0f, 0.315f, -0.01f), "CHANNELS", 0.0095f,
+                new Color(0.88f, 0.97f, 1f, 1f));
 
-            _statusLine = Text("StatusLine", _root, new Vector3(0f, -0.315f, -0.01f), "", 0.006f,
-                new Color(0.7f, 0.85f, 1f, 0.9f));
+            _statusLine = Text("StatusLine", _root, new Vector3(0f, -0.315f, -0.01f), "", 0.0058f,
+                new Color(0.75f, 0.90f, 1f, 0.95f));
 
             _rowsRoot = new GameObject("Rows").transform;
             _rowsRoot.SetParent(_root, false);
@@ -94,14 +97,7 @@ namespace TakXr.UI
 
         void PlaceFacing()
         {
-            if (_cam == null) return;
-            var camPos = _cam.position;
-            var flat = _cam.forward;
-            flat.y = 0f;
-            if (flat.sqrMagnitude < 1e-6f) flat = Vector3.forward;
-            flat.Normalize();
-            _root.position = camPos + flat * 1.7f + Vector3.up * 0.05f;
-            _root.rotation = XrUiFacing.RotationFacingUser(_root.position, camPos);
+            XrUiFacing.PlaceInDockTray(_root, _cam, new Vector3(0f, 0.14f, 1.55f));
         }
 
         async System.Threading.Tasks.Task RefreshData()
@@ -302,10 +298,11 @@ namespace TakXr.UI
             Quad("Bg", row, Vector3.zero, new Vector2(PanelW - 0.06f, RowH - 0.008f),
                 new Color(0.10f, 0.18f, 0.27f, 0.95f), 3000);
 
-            var nameTm = Text("Name", row, new Vector3(-PanelW / 2f + 0.06f, 0f, -0.008f),
-                Trunc(label, 34), 0.0085f, Color.white);
+            var nameTm = Text("Name", row, new Vector3(-PanelW / 2f + 0.055f, 0f, -0.008f),
+                Trunc(label, 34), 0.0068f, Color.white);
             nameTm.anchor = TextAnchor.MiddleLeft;
             nameTm.alignment = TextAlignment.Left;
+            XrText.SetMaxBounds(nameTm, PanelW - 0.28f, RowH * 0.78f);
 
             // State chip on the right.
             var chip = new GameObject("Chip").transform;
@@ -338,6 +335,7 @@ namespace TakXr.UI
         void Update()
         {
             if (!IsVisible) return;
+            PlaceFacing();
             for (int h = 0; h < 2; h++)
             {
                 bool aimOk = XrHandPinchInput.TryGetAim(h, out var origin, out var fwd);

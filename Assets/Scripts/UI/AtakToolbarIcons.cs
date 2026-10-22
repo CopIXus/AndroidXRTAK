@@ -71,8 +71,7 @@ namespace TakXr.UI
             { "rubbersheet", "nav_rubber_sheet" },
             { "tracks", "nav_track_history" },
             { "quit", "nav_power" },
-            { "pageup", "nav_more" },
-            { "pagedown", "nav_more" },
+            // pageup/pagedown stay procedural chevrons (nav_more is an ellipsis).
         };
 
         public static Texture2D Get(string name)
@@ -231,6 +230,24 @@ namespace TakXr.UI
                 case "close":
                     Line(px, s, 0.20f, 0.20f, 0.80f, 0.80f, ink);
                     Line(px, s, 0.20f, 0.80f, 0.80f, 0.20f, ink);
+                    break;
+                case "pageup":
+                case "prev":
+                case "chevron_left":
+                    // Thick < chevron for menu pagination.
+                    Line(px, s, 0.62f, 0.18f, 0.30f, 0.50f, ink);
+                    Line(px, s, 0.30f, 0.50f, 0.62f, 0.82f, ink);
+                    Line(px, s, 0.70f, 0.18f, 0.38f, 0.50f, ink);
+                    Line(px, s, 0.38f, 0.50f, 0.70f, 0.82f, ink);
+                    break;
+                case "pagedown":
+                case "next":
+                case "chevron_right":
+                    // Thick > chevron for menu pagination.
+                    Line(px, s, 0.38f, 0.18f, 0.70f, 0.50f, ink);
+                    Line(px, s, 0.70f, 0.50f, 0.38f, 0.82f, ink);
+                    Line(px, s, 0.30f, 0.18f, 0.62f, 0.50f, ink);
+                    Line(px, s, 0.62f, 0.50f, 0.30f, 0.82f, ink);
                     break;
                 case "map":
                     // Tri-fold map like the ATAK top bar.

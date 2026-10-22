@@ -92,9 +92,7 @@ namespace TakXr.Cot
                 contact = new CotContact
                 {
                     callsign = id.callsign,
-                    // Intentionally omit endpoint: ATAK treats endpoint SA as a
-                    // Contacts team-dot and ignores usericon. Without endpoint the
-                    // Generic Icons man glyph (below) is shown instead.
+                    endpoint = "*:-1:stcp",
                 },
                 detail = new CotDetail
                 {

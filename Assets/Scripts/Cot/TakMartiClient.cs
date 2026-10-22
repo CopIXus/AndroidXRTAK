@@ -67,7 +67,18 @@ namespace TakXr.Cot
             if (p12 == null || p12.Length == 0) throw new ArgumentException("p12 required");
             _host = host;
             _port = port;
-            _cert = new X509Certificate2(p12, p12Password, TakXr.Core.TakCertStore.KeyFlags);
+            _cert = TakXr.Core.TakCertStore.CreateCert(p12, p12Password);
+            _certs = new X509CertificateCollection { _cert };
+            Debug.Log($"[TakMarti] client ready host={_host} port={_port} certSubject={_cert.Subject} hasPrivateKey={_cert.HasPrivateKey}");
+        }
+
+        public TakMartiClient(string host, int port, X509Certificate2 cert)
+        {
+            if (string.IsNullOrEmpty(host)) throw new ArgumentException("host required");
+            if (cert == null || !cert.HasPrivateKey) throw new ArgumentException("client cert with private key required");
+            _host = host;
+            _port = port;
+            _cert = cert;
             _certs = new X509CertificateCollection { _cert };
             Debug.Log($"[TakMarti] client ready host={_host} port={_port} certSubject={_cert.Subject} hasPrivateKey={_cert.HasPrivateKey}");
         }
@@ -201,7 +212,11 @@ namespace TakXr.Cot
             tcp.ReceiveTimeout = 30_000;
             tcp.SendTimeout = 15_000;
 
-            using var ssl = new SslStream(tcp.GetStream(), false, (_, _, _, _) => true);
+            using var ssl = new SslStream(
+                tcp.GetStream(),
+                false,
+                (_, _, _, _) => true,
+                (_, _, localCerts, _, _) => localCerts != null && localCerts.Count > 0 ? localCerts[0] : _cert);
             AuthenticateTls(ssl);
 
             var body = jsonBody != null ? Encoding.UTF8.GetBytes(jsonBody) : null;

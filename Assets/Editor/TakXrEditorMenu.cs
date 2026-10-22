@@ -66,8 +66,9 @@ namespace TakXr.Editor
         public static void ConfigureAndroidXrPerformance()
         {
             PlayerSettings.companyName = "CopIX";
-            PlayerSettings.productName = "TAKXR";
+            PlayerSettings.productName = "XRTAK";
             PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "us.copix.takxr");
+            XrTakBranding.Apply();
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel28;
             PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
             PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
@@ -328,6 +329,7 @@ namespace TakXr.Editor
         public static void BuildAndroidApk()
         {
             PrepareProject();
+            XrTakBranding.Apply();
             EnsureOpenXrReady();
 
             if (!EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android))

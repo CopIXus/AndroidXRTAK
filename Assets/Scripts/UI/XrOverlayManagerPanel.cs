@@ -81,10 +81,11 @@ namespace TakXr.UI
             _root.SetParent(transform, false);
             _root.gameObject.SetActive(false);
 
-            Quad("Bg", _root, new Vector3(0f, 0f, 0.01f), new Vector2(PanelW, PanelH),
-                new Color(0.04f, 0.08f, 0.14f, 0.95f), 2990);
-            Quad("TopBar", _root, new Vector3(0f, PanelH / 2f - 0.008f, 0.005f),
-                new Vector2(PanelW, 0.014f), new Color(0.20f, 0.85f, 0.65f, 0.96f), 2995);
+            XrCurvedWidgets.CreateCurvedPanelPlate(
+                "CurvedBg", _root, PanelW, PanelH,
+                new Color(0.04f, 0.09f, 0.15f, 0.95f),
+                new Color(0.18f, 0.88f, 0.96f, 0.96f),
+                archHeight: 0.012f, depthWrap: 0.038f, renderQueue: 2990);
 
             _contentRoot = new GameObject("Content").transform;
             _contentRoot.SetParent(_root, false);
@@ -116,15 +117,7 @@ namespace TakXr.UI
 
         void PlaceFacing()
         {
-            if (_cam == null && Camera.main != null) _cam = Camera.main.transform;
-            if (_cam == null) return;
-            var camPos = _cam.position;
-            var flat = _cam.forward;
-            flat.y = 0f;
-            if (flat.sqrMagnitude < 1e-6f) flat = Vector3.forward;
-            flat.Normalize();
-            _root.position = camPos + flat * 1.65f + Vector3.up * -0.02f;
-            _root.rotation = XrUiFacing.RotationFacingUser(_root.position, camPos);
+            XrUiFacing.PlaceInDockTray(_root, _cam, new Vector3(0f, 0.14f, 1.55f));
         }
 
         void RebuildUi()
@@ -132,9 +125,10 @@ namespace TakXr.UI
             foreach (Transform child in _contentRoot) Destroy(child.gameObject);
             _hitTargets.Clear();
 
-            Text("Title", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, PanelH / 2f - 0.048f, -0.01f),
+            var titleTm = Text("Title", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, PanelH / 2f - 0.048f, -0.01f),
                 "ATAK OVERLAY MANAGER  ·  3D LAYERS & IMPORT",
-                0.0086f, new Color(0.88f, 0.98f, 0.94f, 1f), TextAnchor.MiddleLeft, TextAlignment.Left);
+                0.0072f, new Color(0.88f, 0.98f, 0.94f, 1f), TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(titleTm, PanelW - 0.22f, 0.044f);
 
             AddButton("Close", new Vector3(PanelW / 2f - 0.055f, PanelH / 2f - 0.048f, -0.01f),
                 new Vector2(0.068f, 0.048f), "X", false, Hide);
@@ -188,7 +182,7 @@ namespace TakXr.UI
                     RebuildUi();
                 });
 
-            // Row 3: Import / Server Packages / 3D Demo Formation
+            // Row 3: Import / Server Packages / Server Channels
             y -= 0.062f;
             AddButton("ImportBtn", new Vector3(-0.34f, y, -0.01f), new Vector2(0.31f, 0.048f),
                 "Import .cot / .kml", true, ImportLocalFiles);
@@ -196,10 +190,14 @@ namespace TakXr.UI
                 "Marti Data Packages", false, () =>
                 {
                     Hide();
-                    _packagePanel?.Toggle(_cam);
+                    _packagePanel?.Open(XrLayersPanel.Tab.Packages, _cam);
                 });
-            AddButton("Demo3D", new Vector3(0.34f, y, -0.01f), new Vector2(0.31f, 0.048f),
-                _demoSpawned ? "Clear 3D Demo" : "Spawn 3D Demo", _demoSpawned, ToggleDemoFormation);
+            AddButton("MartiCh", new Vector3(0.34f, y, -0.01f), new Vector2(0.31f, 0.048f),
+                "Marti Channels", false, () =>
+                {
+                    Hide();
+                    _packagePanel?.Open(XrLayersPanel.Tab.Channels, _cam);
+                });
 
             // Entity List
             y -= 0.055f;
@@ -235,12 +233,14 @@ namespace TakXr.UI
                 Quad("Badge_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.065f, y, -0.004f),
                     new Vector2(0.024f, 0.038f), badgeCol, 3001);
 
-                Text("Name_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y + 0.009f, -0.01f),
-                    c.Callsign ?? c.uid, 0.0072f, hidden ? new Color(0.5f, 0.55f, 0.6f) : Color.white,
+                var nameTm = Text("Name_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y + 0.011f, -0.01f),
+                    c.Callsign ?? c.uid, 0.0062f, hidden ? new Color(0.5f, 0.55f, 0.6f) : Color.white,
                     TextAnchor.MiddleLeft, TextAlignment.Left);
-                Text("Kind_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y - 0.013f, -0.01f),
+                XrText.SetMaxBounds(nameTm, 0.52f, 0.030f);
+                var kindTm = Text("Kind_" + i, _contentRoot, new Vector3(-PanelW / 2f + 0.095f, y - 0.013f, -0.01f),
                     $"3D {kind}  ·  {c.type}  ·  {c.point?.lat:F4}, {c.point?.lon:F4}",
-                    0.0055f, new Color(0.65f, 0.82f, 0.94f, 0.90f), TextAnchor.MiddleLeft, TextAlignment.Left);
+                    0.0048f, new Color(0.65f, 0.82f, 0.94f, 0.90f), TextAnchor.MiddleLeft, TextAlignment.Left);
+                XrText.SetMaxBounds(kindTm, 0.52f, 0.026f);
 
                 var captured = c;
                 AddButton("Vis_" + i, new Vector3(0.18f, y, -0.01f), new Vector2(0.15f, 0.044f),
@@ -552,6 +552,7 @@ namespace TakXr.UI
         void Update()
         {
             if (!IsVisible) return;
+            PlaceFacing();
             for (int h = 0; h < 2; h++)
             {
                 bool aimOk = XrHandPinchInput.TryGetAim(h, out var origin, out var fwd);
@@ -599,14 +600,18 @@ namespace TakXr.UI
 
         void AddButton(string name, Vector3 pos, Vector2 size, string label, bool active, Action onClick)
         {
-            var root = new GameObject("Btn_" + name).transform;
-            root.SetParent(_contentRoot, false);
-            root.localPosition = pos;
-            Color bg = active
-                ? new Color(0.14f, 0.50f, 0.44f, 0.97f)
-                : new Color(0.10f, 0.19f, 0.28f, 0.95f);
-            Quad("Bg", root, Vector3.zero, size, bg, 3000);
-            Text("Lbl", root, new Vector3(0f, 0f, -0.005f), label, 0.0060f, Color.white);
+            XrCurvedWidgets.EvaluateArc(pos.x, PanelW * 0.5f, 0.012f, 0.038f, out var arcOff, out var arcRot);
+            Color fill = active
+                ? new Color(0.12f, 0.36f, 0.44f, 0.97f)
+                : new Color(0.08f, 0.16f, 0.25f, 0.96f);
+            Color border = active
+                ? new Color(0.25f, 0.95f, 1f, 0.95f)
+                : new Color(0.20f, 0.68f, 0.88f, 0.80f);
+            var root = XrCurvedWidgets.CreateRoundedButtonCard(
+                "Btn_" + name, _contentRoot, size, fill, border, 3000);
+            root.localPosition = new Vector3(pos.x, pos.y + arcOff.y * 0.35f, pos.z + arcOff.z * 0.65f);
+            root.localRotation = arcRot;
+            Text("Lbl", root, new Vector3(0f, 0f, -0.005f), label, 0.0058f, Color.white);
             var col = root.gameObject.AddComponent<BoxCollider>();
             col.size = new Vector3(size.x + 0.01f, size.y + 0.01f, 0.035f);
             col.isTrigger = true;

@@ -256,16 +256,8 @@ namespace TakXr.UI
 
         public void PlaceFacing(Transform camera)
         {
-            if (!IsVisible || camera == null) return;
-            var camPos = camera.position;
-            var flat = camera.forward;
-            flat.y = 0f;
-            if (flat.sqrMagnitude < 1e-6f) flat = Vector3.forward;
-            flat.Normalize();
-            // Farther than chrome so the panel is comfortable.
-            _root.position = camPos + flat * 2.0f + Vector3.up * 0.05f;
-            // XrUiFacing convention: +Z away from camera (readable side toward viewer).
-            _root.rotation = XrUiFacing.RotationFacingUser(_root.position, camPos);
+            if (!IsVisible || _root == null) return;
+            XrUiFacing.PlaceInDockTray(_root, camera, new Vector3(0f, 0.14f, 1.55f));
         }
 
         public bool HandleRaySelect(Ray ray, float maxDist = 6f)
@@ -615,8 +607,10 @@ namespace TakXr.UI
             tm.text = msg;
             // Crisp world text: large fontSize, tiny characterSize
             // (world height = characterSize * fontSize * 0.1).
-            tm.characterSize = charSize;
-            tm.fontSize = 300;
+            tm.characterSize = charSize * 300f / TakXr.UI.XrText.CrispFontSize;
+            tm.fontSize = TakXr.UI.XrText.CrispFontSize;
+            tm.font = TakXr.UI.XrText.SharedFont;
+            TakXr.UI.XrText.Sharpen(tm);
             tm.anchor = TextAnchor.MiddleCenter;
             tm.alignment = TextAlignment.Center;
             tm.color = color;

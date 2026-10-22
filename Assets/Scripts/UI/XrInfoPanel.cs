@@ -113,15 +113,8 @@ namespace TakXr.UI
 
         public void PlaceFacing(Transform camera)
         {
-            if (!_visible || camera == null || _root == null) return;
-            var camPos = camera.position;
-            var flat = camera.forward;
-            flat.y = 0f;
-            if (flat.sqrMagnitude < 1e-6f) flat = Vector3.forward;
-            flat.Normalize();
-            _root.position = camPos + flat * 1.8f + Vector3.up * -0.05f;
-            // +Z toward camera so TextMesh / button labels read correctly.
-            _root.rotation = XrUiFacing.RotationFacingUser(_root.position, camPos);
+            if (!_visible || _root == null) return;
+            XrUiFacing.PlaceInDockTray(_root, camera, new Vector3(0f, 0.14f, 1.55f));
         }
 
         /// <summary>True if the ray hit this panel (and possibly activated a button).</summary>

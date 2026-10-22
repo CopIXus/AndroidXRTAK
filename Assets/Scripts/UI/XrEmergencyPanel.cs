@@ -119,10 +119,11 @@ namespace TakXr.UI
             _root.SetParent(transform, false);
             _root.gameObject.SetActive(false);
 
-            Quad("Bg", _root, new Vector3(0f, 0f, 0.01f), new Vector2(PanelW, PanelH),
-                new Color(0.11f, 0.04f, 0.05f, 0.95f), 2990);
-            Quad("TopBar", _root, new Vector3(0f, PanelH / 2f - 0.008f, 0.005f),
-                new Vector2(PanelW, 0.015f), new Color(1f, 0.22f, 0.20f, 0.98f), 2995);
+            XrCurvedWidgets.CreateCurvedPanelPlate(
+                "CurvedBg", _root, PanelW, PanelH,
+                new Color(0.12f, 0.04f, 0.06f, 0.95f),
+                new Color(0.98f, 0.28f, 0.30f, 0.96f),
+                archHeight: 0.012f, depthWrap: 0.038f, renderQueue: 2990);
 
             _contentRoot = new GameObject("Content").transform;
             _contentRoot.SetParent(_root, false);
@@ -165,15 +166,7 @@ namespace TakXr.UI
 
         void PlaceFacing()
         {
-            if (_cam == null && Camera.main != null) _cam = Camera.main.transform;
-            if (_cam == null) return;
-            var camPos = _cam.position;
-            var flat = _cam.forward;
-            flat.y = 0f;
-            if (flat.sqrMagnitude < 1e-6f) flat = Vector3.forward;
-            flat.Normalize();
-            _root.position = camPos + flat * 1.60f + Vector3.up * -0.02f;
-            _root.rotation = XrUiFacing.RotationFacingUser(_root.position, camPos);
+            XrUiFacing.PlaceInDockTray(_root, _cam, new Vector3(0f, 0.14f, 1.55f));
         }
 
         void RebuildUi()
@@ -181,9 +174,10 @@ namespace TakXr.UI
             foreach (Transform child in _contentRoot) Destroy(child.gameObject);
             _hitTargets.Clear();
 
-            Text("Title", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, PanelH / 2f - 0.048f, -0.01f),
-                _casevacTab ? "9-LINE CASEVAC / MEDEVAC REQUEST" : "ATAK EMERGENCY BEACON (911 ALERT)",
-                0.0085f, new Color(1f, 0.88f, 0.88f, 1f), TextAnchor.MiddleLeft, TextAlignment.Left);
+            var titleTm = Text("Title", _contentRoot, new Vector3(-PanelW / 2f + 0.045f, PanelH / 2f - 0.048f, -0.01f),
+                _casevacTab ? "9-LINE CASEVAC REQUEST" : "EMERGENCY BEACON (911)",
+                0.0066f, new Color(1f, 0.88f, 0.88f, 1f), TextAnchor.MiddleLeft, TextAlignment.Left);
+            XrText.SetMaxBounds(titleTm, 0.48f, 0.042f);
 
             AddButton("TabEm", new Vector3(0.11f, PanelH / 2f - 0.048f, -0.01f),
                 new Vector2(0.19f, 0.048f), "911 Beacon", !_casevacTab, () =>
@@ -402,6 +396,7 @@ namespace TakXr.UI
             }
 
             if (!IsVisible) return;
+            PlaceFacing();
             for (int h = 0; h < 2; h++)
             {
                 bool aimOk = XrHandPinchInput.TryGetAim(h, out var origin, out var fwd);

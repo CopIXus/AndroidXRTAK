@@ -5,13 +5,25 @@ using UnityEngine;
 namespace TakXr.Locomotion
 {
     /// <summary>
-    /// Google Maps immersive-style locomotion: stick fly, trigger/pinch drag-pan,
-    /// two-hand stretch zoom. Moves <see cref="XrWorldRoot"/> only — never the HMD.
+    /// Google Maps Immersive View locomotion (Android XR help: pinch-drag to pan,
+    /// two-hand spread to zoom, two-hand twist to rotate):
+    /// 1. Single-Hand Pinch — ray-anchored grab. The map point under your aim sticks
+    ///    1:1 to the ray (pull the world toward you). Short soft coast on release.
+    /// 2. Two-Hand Pinch — spread/pinch to zoom about the focus in front of you;
+    ///    steering-wheel twist to rotate; gentle dual-hand lift to tilt.
+    /// 3. Controllers — left stick pans the map plane; right stick zooms/yaws; B/Y+stick tilts.
     /// </summary>
     public class XrWorldLocomotion : MonoBehaviour
     {
-        const float DragThresholdM = 0.003f;
-        const float StickDeadzone = 0.12f;
+        const float DragThresholdM = 0.004f;
+        const float StickDeadzone = 0.15f;
+        /// <summary>Maps-like short coast — was 6.5 and felt like a rocket after release.</summary>
+        const float InertiaDamping = 14f;
+        const float InertiaMaxSpeed = 45f;
+        /// <summary>Ignore sub-millimeter hand jitter before starting a pan.</summary>
+        const float GrabSettleM = 0.008f;
+
+        static readonly float[] TiltPresetDegs = { 0f, 38f, 62f };
 
         [SerializeField] XrWorldRoot world;
         [SerializeField] Transform cameraTransform;
@@ -21,6 +33,9 @@ namespace TakXr.Locomotion
         {
             public bool grabbing;
             public Vector3 lastPos;
+            /// <summary>Grabbed map point in world-root local space (Maps-style anchor).</summary>
+            public Vector3 grabLocal;
+            public bool hasGrab;
             public float moved;
         }
 
@@ -29,6 +44,8 @@ namespace TakXr.Locomotion
         Vector3 _prevMid;
         float _prevDist;
         float _prevAngle;
+        float _prevAvgY;
+        Vector3 _panVelocity;
         float _speedMul = 1f;
         bool _snapTurnEnabled;
         float _snapCooldown;
@@ -69,9 +86,31 @@ namespace TakXr.Locomotion
             navigated |= UpdateThumbsticks();
             navigated |= UpdateSnapTurn();
             navigated |= UpdatePinchAndControllers();
+            navigated |= UpdateInertia();
             navigated |= UpdateKeyboardFallback();
 
             if (navigated) map?.NotifyMoving(true);
+        }
+
+        bool UpdateInertia()
+        {
+            if (_grabs[0].grabbing || _grabs[1].grabbing) return false;
+            if (_panVelocity.sqrMagnitude < 0.01f)
+            {
+                _panVelocity = Vector3.zero;
+                return false;
+            }
+            var mapUp = world.Root.up;
+            _panVelocity = Vector3.ProjectOnPlane(_panVelocity, mapUp);
+            if (_panVelocity.magnitude > InertiaMaxSpeed)
+                _panVelocity = _panVelocity.normalized * InertiaMaxSpeed;
+            world.Root.position += _panVelocity * Time.deltaTime;
+            // Exponential decay — short Maps-like coast, not a long slide.
+            float damp = Mathf.Exp(-InertiaDamping * Time.deltaTime);
+            _panVelocity *= damp;
+            if (_panVelocity.sqrMagnitude < 0.01f)
+                _panVelocity = Vector3.zero;
+            return true;
         }
 
         bool UpdateSnapTurn()
@@ -84,7 +123,8 @@ namespace TakXr.Locomotion
             if (outNow && !_stickWasOut)
             {
                 float dir = stick.x > 0f ? 1f : -1f;
-                world.RotateAboutPointY(cameraTransform.position, dir * 45f * Mathf.Deg2Rad);
+                var pivot = world.GetFocusPivot(cameraTransform);
+                world.RotateAboutMapUp(pivot, dir * 45f * Mathf.Deg2Rad);
                 _snapCooldown = Time.unscaledTime + 0.28f;
                 _stickWasOut = true;
                 map?.NotifyMoving(true);
@@ -99,12 +139,12 @@ namespace TakXr.Locomotion
             var kb = UnityEngine.InputSystem.Keyboard.current;
             if (kb == null) return false;
             float speed = MoveSpeed() * Time.deltaTime;
-            FlatBasis(out var flatFwd, out var right);
+            MapSurfaceBasis(out var mapFwd, out var mapRight, out var mapUp);
             Vector3 move = Vector3.zero;
-            if (kb.wKey.isPressed) move -= flatFwd;
-            if (kb.sKey.isPressed) move += flatFwd;
-            if (kb.aKey.isPressed) move += right;
-            if (kb.dKey.isPressed) move -= right;
+            if (kb.wKey.isPressed) move -= mapFwd;
+            if (kb.sKey.isPressed) move += mapFwd;
+            if (kb.aKey.isPressed) move += mapRight;
+            if (kb.dKey.isPressed) move -= mapRight;
             if (kb.rKey.isPressed)
             {
                 if (kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed)
@@ -112,7 +152,7 @@ namespace TakXr.Locomotion
                     ApplyPitchDelta(55f * Time.deltaTime);
                     return true;
                 }
-                move += Vector3.down;
+                move -= mapUp;
             }
             if (kb.fKey.isPressed)
             {
@@ -121,7 +161,12 @@ namespace TakXr.Locomotion
                     ApplyPitchDelta(-55f * Time.deltaTime);
                     return true;
                 }
-                move += Vector3.up;
+                move += mapUp;
+            }
+            if (kb.tKey.wasPressedThisFrame)
+            {
+                CycleTiltPreset();
+                return true;
             }
             if (move.sqrMagnitude < 1e-6f)
             {
@@ -129,6 +174,20 @@ namespace TakXr.Locomotion
                 return false;
             }
             world.Root.position += move.normalized * speed;
+            return true;
+        }
+
+        bool TryIntersectMapPlane(int handIndex, out Vector3 planeHit)
+        {
+            planeHit = Vector3.zero;
+            if (world == null || !XrHandPinchInput.TryGetAim(handIndex, out var origin, out var fwd))
+                return false;
+            var mapUp = world.Root.up;
+            float denom = Vector3.Dot(fwd, mapUp);
+            if (Mathf.Abs(denom) < 0.06f) return false;
+            float t = Vector3.Dot(world.Root.position - origin, mapUp) / denom;
+            if (t <= 0.2f || t > 18000f) return false;
+            planeHit = origin + fwd * t;
             return true;
         }
 
@@ -144,7 +203,7 @@ namespace TakXr.Locomotion
                                 !XrHandPinchInput.IsUiBlocking(i) &&
                                 !TakXr.UI.XrDrawTool.IsArmed &&
                                 !TakXr.UI.XrRangeMeasureTool.IsArmed &&
-                                !TakXr.UI.XrElevationTool.IsArmed; // tool pinches must not drag the map
+                                !TakXr.UI.XrElevationTool.IsArmed;
 
                 ref var g = ref _grabs[i];
                 if (wantGrab)
@@ -154,6 +213,14 @@ namespace TakXr.Locomotion
                         g.grabbing = true;
                         g.moved = 0f;
                         g.lastPos = pos;
+                        g.hasGrab = false;
+                        // Maps: lock the map point under the aim ray (or hand projection).
+                        if (TryIntersectMapPlane(i, out var hit))
+                        {
+                            g.grabLocal = world.Root.InverseTransformPoint(hit);
+                            g.hasGrab = true;
+                        }
+                        _panVelocity = Vector3.zero;
                     }
                     active.Add(i);
                     positions[i] = pos;
@@ -161,11 +228,12 @@ namespace TakXr.Locomotion
                 else if (g.grabbing)
                 {
                     g.grabbing = false;
+                    g.hasGrab = false;
                     _twoHand = false;
                 }
             }
 
-            float gain = PanGain();
+            var mapUp = world.Root.up;
 
             if (active.Count == 1)
             {
@@ -173,18 +241,49 @@ namespace TakXr.Locomotion
                 int i = active[0];
                 ref var g = ref _grabs[i];
                 var pos = positions[i];
-                var delta = pos - g.lastPos;
-                g.moved += delta.magnitude;
-                if (delta.sqrMagnitude > 1e-10f && g.moved > DragThresholdM)
+                var handDelta = pos - g.lastPos;
+                g.moved += handDelta.magnitude;
+                g.lastPos = pos;
+
+                if (g.moved < GrabSettleM) return false;
+
+                // Google Maps Immersive View: "pinch and drag … pull the world towards you".
+                // Keep the grabbed map point stuck under the current aim ray — true 1:1,
+                // no altitude-scaled hand gain (that was launching the map).
+                if (!TryIntersectMapPlane(i, out var rayHit))
                 {
-                    // Ground-plane pan only — ignore vertical hand motion so tilt
-                    // does not make drag lift/drop the world.
-                    delta.y = 0f;
-                    world.Root.position += delta * gain;
-                    g.lastPos = pos;
+                    // Fallback: gentle 1:1 hand slide on the map plane if the ray misses.
+                    var fallback = Vector3.ProjectOnPlane(handDelta, mapUp);
+                    if (fallback.sqrMagnitude > 1e-8f && g.moved > DragThresholdM)
+                    {
+                        world.Root.position += fallback;
+                        CaptureSoftInertia(fallback);
+                        return true;
+                    }
+                    return false;
+                }
+
+                if (!g.hasGrab)
+                {
+                    g.grabLocal = world.Root.InverseTransformPoint(rayHit);
+                    g.hasGrab = true;
+                    return false;
+                }
+
+                var grabbedNow = world.Root.TransformPoint(g.grabLocal);
+                var worldDelta = Vector3.ProjectOnPlane(rayHit - grabbedNow, mapUp);
+
+                // Cap one-frame jumps (tracking glitches) without altitude amplification.
+                float maxStep = Mathf.Clamp(ViewerHeight() * 0.08f, 0.35f, 12f);
+                if (worldDelta.magnitude > maxStep)
+                    worldDelta = worldDelta.normalized * maxStep;
+
+                if (worldDelta.sqrMagnitude > 1e-8f && g.moved > DragThresholdM)
+                {
+                    world.Root.position += worldDelta;
+                    CaptureSoftInertia(worldDelta);
                     return true;
                 }
-                g.lastPos = pos;
             }
             else if (active.Count == 2)
             {
@@ -192,7 +291,9 @@ namespace TakXr.Locomotion
                 var b = positions[active[1]];
                 var mid = (a + b) * 0.5f;
                 float dist = Vector3.Distance(a, b);
+                // Measure hand-to-hand angle on the horizontal plane for natural steering-wheel rotation
                 float angle = Mathf.Atan2(a.x - b.x, a.z - b.z);
+                float avgY = (a.y + b.y) * 0.5f;
 
                 if (!_twoHand)
                 {
@@ -200,42 +301,93 @@ namespace TakXr.Locomotion
                     _prevMid = mid;
                     _prevDist = Mathf.Max(dist, 1e-4f);
                     _prevAngle = angle;
+                    _prevAvgY = avgY;
+                    _panVelocity = Vector3.zero;
+                    // Clear single-hand anchors so we don't mix modes.
+                    _grabs[0].hasGrab = false;
+                    _grabs[1].hasGrab = false;
                 }
                 else
                 {
                     bool moved = false;
-                    var midDelta = mid - _prevMid;
-                    midDelta.y = 0f;
-                    if (midDelta.sqrMagnitude > 0f)
+                    var focusPivot = world.GetFocusPivot(cameraTransform);
+
+                    // 1. Two-hand pan — 1:1 hand midpoint on the map plane (Maps dual-hand drag).
+                    //    Do NOT multiply by altitude PanGain (that made dual-hand wild).
+                    var midDelta = Vector3.ProjectOnPlane(mid - _prevMid, mapUp);
+                    float twoHandGain = TwoHandPanGain();
+                    midDelta *= twoHandGain;
+                    float maxTwo = Mathf.Clamp(ViewerHeight() * 0.06f, 0.25f, 8f);
+                    if (midDelta.magnitude > maxTwo)
+                        midDelta = midDelta.normalized * maxTwo;
+                    if (midDelta.sqrMagnitude > 1e-8f)
                     {
-                        world.Root.position += midDelta * gain;
+                        world.Root.position += midDelta;
                         moved = true;
                     }
-                    if (_prevDist > 1e-4f && dist > 1e-4f)
+
+                    // 2. Two-hand stretch / pinch zoom (Maps: move hands closer/further).
+                    if (_prevDist > 0.04f && dist > 0.04f)
                     {
-                        float factor = dist / _prevDist;
-                        if (Mathf.Abs(factor - 1f) > 1e-4f)
+                        float rawFactor = dist / _prevDist;
+                        // Near 1:1 with hand spacing — slight 1.1x feel, not the old 1.45x rocket zoom.
+                        float factor = 1f + (rawFactor - 1f) * 1.1f;
+                        if (Mathf.Abs(factor - 1f) > 0.0025f)
                         {
-                            world.ScaleAboutPoint(mid, factor);
+                            bool isTabletop = TakXr.UI.XrTacticalToolsSuite.Instance != null &&
+                                              TakXr.UI.XrTacticalToolsSuite.Instance.IsTabletopActive;
+                            if (isTabletop)
+                            {
+                                world.ScaleAboutPoint(focusPivot, factor);
+                            }
+                            else
+                            {
+                                // Hands apart (factor > 1) → zoom IN toward focus in front of eyes.
+                                float zoomStep = Mathf.Clamp(factor - 1f, -0.12f, 0.12f);
+                                var toPivot = cameraTransform.position - focusPivot;
+                                world.Root.position += toPivot * zoomStep;
+                            }
                             moved = true;
                         }
                     }
+
+                    // 3. Two-hand twist → rotate around map surface normal (Maps steering wheel).
                     float dAngle = Mathf.DeltaAngle(_prevAngle * Mathf.Rad2Deg, angle * Mathf.Rad2Deg) * Mathf.Deg2Rad;
-                    if (Mathf.Abs(dAngle) > 1e-4f)
+                    if (Mathf.Abs(dAngle) > 0.003f)
                     {
-                        world.RotateAboutPointY(mid, dAngle);
+                        world.RotateAboutMapUp(focusPivot, dAngle);
+                        moved = true;
+                    }
+
+                    // 4. Dual-hand lift → gentle tilt (was 165°/m — far too twitchy).
+                    float dy = avgY - _prevAvgY;
+                    if (Mathf.Abs(dy) > 0.004f)
+                    {
+                        ApplyPitchDelta(dy * 55f);
+                        _onPitchChanged?.Invoke(_savedPitchDeg);
                         moved = true;
                     }
 
                     _prevMid = mid;
                     _prevDist = dist;
                     _prevAngle = angle;
+                    _prevAvgY = avgY;
                     return moved;
                 }
             }
             else _twoHand = false;
 
             return false;
+        }
+
+        void CaptureSoftInertia(Vector3 worldDelta)
+        {
+            float dt = Mathf.Max(Time.deltaTime, 0.008f);
+            var sample = worldDelta / dt;
+            // Light blend + hard cap so release never flings the map.
+            _panVelocity = Vector3.Lerp(_panVelocity, sample, 0.22f);
+            if (_panVelocity.magnitude > InertiaMaxSpeed)
+                _panVelocity = _panVelocity.normalized * InertiaMaxSpeed;
         }
 
         bool UpdateWorldTilt()
@@ -268,6 +420,36 @@ namespace TakXr.Locomotion
             _savedPitchDeg = world.WorldPitchDeg;
         }
 
+        /// <summary>
+        /// Cycles upright God's-Eye tilt presets:
+        /// 0° Flat Floor → 38° Angled Command Desk → 62° Upright Wall Map (look straight ahead).
+        /// </summary>
+        public float CycleTiltPreset()
+        {
+            if (world == null || cameraTransform == null) return _savedPitchDeg;
+            float cur = world.WorldPitchDeg;
+            float next = TiltPresetDegs[0];
+            for (int i = 0; i < TiltPresetDegs.Length; i++)
+            {
+                if (cur < TiltPresetDegs[i] - 8f)
+                {
+                    next = TiltPresetDegs[i];
+                    break;
+                }
+            }
+            SetWorldTilt(next);
+            return next;
+        }
+
+        public void SetWorldTilt(float targetDeg)
+        {
+            if (world == null || cameraTransform == null) return;
+            world.SetWorldPitch(cameraTransform, targetDeg);
+            _savedPitchDeg = world.WorldPitchDeg;
+            _onPitchChanged?.Invoke(_savedPitchDeg);
+            map?.NotifyMoving(true);
+        }
+
         public void RestoreSavedPitch()
         {
             if (world == null || cameraTransform == null) return;
@@ -287,39 +469,39 @@ namespace TakXr.Locomotion
         {
             bool tilting = XrHandPinchInput.IsTiltModifierHeld();
             float speed = MoveSpeed() * Time.deltaTime;
-            FlatBasis(out var flatFwd, out var right);
-            var camPos = cameraTransform.position;
+            MapSurfaceBasis(out var mapFwd, out var mapRight, out var mapUp);
             bool navigated = false;
             bool hasRight = XrHandPinchInput.HasStick(1);
 
-            // Left stick browse (horizontal pan). Forward/back matches keyboard W/S:
-            // stick forward → fly forward (world moves opposite look / map comes toward you).
             if (XrHandPinchInput.TryGetStick(0, out var left) && left.magnitude > StickDeadzone)
             {
+                _panVelocity = Vector3.zero;
                 if (tilting)
                 {
-                    // Y is consumed by world tilt; keep strafe on X.
                     if (Mathf.Abs(left.x) > StickDeadzone)
                     {
-                        world.Root.position += (-right * left.x) * speed;
+                        world.Root.position += (-mapRight * left.x) * speed;
                         navigated = true;
                     }
                 }
                 else
                 {
-                    world.Root.position += (-flatFwd * left.y - right * left.x) * speed;
+                    world.Root.position += (-mapFwd * left.y - mapRight * left.x) * speed;
                     navigated = true;
                 }
             }
 
-            // Right stick: altitude + continuous yaw (snap-turn uses discrete X press when enabled).
             if (hasRight && XrHandPinchInput.TryGetStick(1, out var rstick) &&
                 rstick.magnitude > StickDeadzone)
             {
-                if (!tilting)
-                    world.Root.position += Vector3.down * (rstick.y * speed);
-                if (!_snapTurnEnabled)
-                    world.RotateAboutPointY(camPos, -rstick.x * 1.8f * Time.deltaTime);
+                _panVelocity = Vector3.zero;
+                if (!tilting && Mathf.Abs(rstick.y) > StickDeadzone)
+                    world.Root.position += (-mapUp) * (rstick.y * speed);
+                if (!_snapTurnEnabled && Mathf.Abs(rstick.x) > StickDeadzone)
+                {
+                    var pivot = world.GetFocusPivot(cameraTransform);
+                    world.RotateAboutMapUp(pivot, -rstick.x * 1.8f * Time.deltaTime);
+                }
                 navigated = true;
             }
 
@@ -335,10 +517,20 @@ namespace TakXr.Locomotion
             right = Vector3.Cross(Vector3.up, flatFwd).normalized;
         }
 
-        /// <summary>
-        /// Height above the map plane along map-local up. Stable when the world
-        /// is pitched — unlike camera.y - origin.y which jumps with tilt.
-        /// </summary>
+        void MapSurfaceBasis(out Vector3 mapFwd, out Vector3 mapRight, out Vector3 mapUp)
+        {
+            mapUp = world != null ? world.Root.up : Vector3.up;
+            FlatBasis(out var flatFwd, out var flatRight);
+
+            mapRight = Vector3.ProjectOnPlane(flatRight, mapUp);
+            if (mapRight.sqrMagnitude < 1e-6f) mapRight = flatRight;
+            mapRight.Normalize();
+
+            mapFwd = Vector3.Cross(mapRight, mapUp);
+            if (mapFwd.sqrMagnitude < 1e-6f) mapFwd = flatFwd;
+            mapFwd.Normalize();
+        }
+
         float ViewerHeight()
         {
             var up = world.Root.up;
@@ -346,17 +538,23 @@ namespace TakXr.Locomotion
             return Mathf.Clamp(Mathf.Abs(h), 8f, 8000f);
         }
 
-        float PanGain() => Mathf.Clamp(ViewerHeight() * 0.45f, 2f, 4000f);
+        /// <summary>
+        /// Dual-hand midpoint pan: mild altitude feel without the old 0.72×height×5000 rocket.
+        /// Single-hand pan no longer uses this — it is pure ray-anchor 1:1.
+        /// </summary>
+        float TwoHandPanGain() =>
+            Mathf.Clamp(ViewerHeight() * 0.045f * _speedMul, 0.85f, 18f);
 
-        float MoveSpeed() => Mathf.Clamp(ViewerHeight() * 1.6f * _speedMul, 8f, 12000f);
+        /// <summary>Thumbstick / keyboard glide — calmer than the previous 1.6×height curve.</summary>
+        float MoveSpeed() => Mathf.Clamp(ViewerHeight() * 0.55f * _speedMul, 4f, 900f);
 
         public void OrientNorth() => world?.OrientNorth(cameraTransform);
 
         public void TeleportForward(float meters = 120f)
         {
             if (world == null || cameraTransform == null) return;
-            FlatBasis(out var flatFwd, out _);
-            world.Root.position -= flatFwd * meters;
+            MapSurfaceBasis(out var mapFwd, out _, out _);
+            world.Root.position -= mapFwd * meters;
             map?.NotifyMoving(true);
         }
 
@@ -370,13 +568,17 @@ namespace TakXr.Locomotion
         public void ZoomAtCamera(float factor)
         {
             if (world == null || cameraTransform == null) return;
-            world.ScaleAboutPoint(cameraTransform.position, factor);
+            var pivot = world.GetFocusPivot(cameraTransform);
+            var toPivot = cameraTransform.position - pivot;
+            float zoomStep = Mathf.Clamp(factor - 1f, -0.5f, 0.5f);
+            world.Root.position += toPivot * zoomStep;
             map?.NotifyMoving(true);
         }
 
         public void ResetView()
         {
             if (world == null || cameraTransform == null) return;
+            _panVelocity = Vector3.zero;
             world.Root.localScale = Vector3.one;
             world.ApplyInitialOverview(cameraTransform, 160f, 50f);
             world.OrientNorth(cameraTransform);
@@ -384,22 +586,23 @@ namespace TakXr.Locomotion
             map?.NotifyMoving(true);
         }
 
-        /// <summary>Frame the world so <paramref name="worldPoint"/> sits at a comfortable overview.</summary>
         public void FrameWorldPoint(Vector3 worldPoint, float overviewDistM = 160f, float heightM = 50f)
         {
             if (world == null || cameraTransform == null) return;
+            _panVelocity = Vector3.zero;
+            float pitch = _savedPitchDeg;
+            world.Flatten(cameraTransform);
             world.Root.localScale = Vector3.one;
             var camPos = cameraTransform.position;
             FlatBasis(out var flatFwd, out _);
-            // Place world so target is ahead of the HMD at overviewDist.
             var desiredMarker = camPos + flatFwd * overviewDistM + Vector3.down * heightM;
             world.Root.position += desiredMarker - worldPoint;
             world.OrientNorth(cameraTransform);
+            _savedPitchDeg = pitch;
             RestoreSavedPitch();
             map?.NotifyMoving(true);
         }
 
-        /// <summary>Scale/position world so all given marker world positions fit in view.</summary>
         public void FitWorldPoints(System.Collections.Generic.IList<Vector3> points)
         {
             if (world == null || cameraTransform == null || points == null || points.Count == 0)

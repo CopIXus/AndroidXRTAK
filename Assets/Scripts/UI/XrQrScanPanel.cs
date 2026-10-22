@@ -64,7 +64,7 @@ namespace TakXr.UI
             _previewRend.sharedMaterial.renderQueue = 3015;
 
             _hint = Text("Hint", _root, new Vector3(0f, -0.26f, -0.01f),
-                "Point camera at an infraTAK / ATAK QR", 0.0058f,
+                "Point the camera at a TAK enrollment QR", 0.0058f,
                 new Color(0.75f, 0.88f, 1f, 0.95f));
 
             AddBtn("Cancel", new Vector3(0f, -PanelH / 2f + 0.07f, -0.01f),
@@ -142,7 +142,7 @@ namespace TakXr.UI
                 _webcam.Play();
                 if (_previewRend != null && _previewRend.sharedMaterial != null)
                     _previewRend.sharedMaterial.mainTexture = _webcam;
-                if (_hint != null) _hint.text = "Point camera at an infraTAK / ATAK QR";
+                if (_hint != null) _hint.text = "Point the camera at a TAK enrollment QR";
             }
             catch (Exception ex)
             {

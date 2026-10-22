@@ -47,9 +47,10 @@ namespace TakXr.Core
         void Awake()
         {
             Application.targetFrameRate = 72;
-            QualitySettings.vSyncCount = 0;
+            ApplyXrVisualQuality();
+            RequestAndroidXrPermissions();
             _boot = BootHud.Create();
-            _boot.SetStatus("TAKXR", "Booting…");
+            _boot.SetStatus("XRTAK", "Booting…");
 
             try
             {
@@ -64,12 +65,12 @@ namespace TakXr.Core
                 XrInputVisuals.Ensure(_xrOrigin.transform);
 
                 config.showMap = false;
-                _boot.SetStatus("TAKXR", $"XR ready\n{config.backendBaseUrl}");
+                _boot.SetStatus("XRTAK", $"XR ready\n{config.backendBaseUrl}");
             }
             catch (System.Exception ex)
             {
                 Debug.LogError($"[TakXr] Awake: {ex}");
-                _boot?.SetStatus("TAKXR ERROR", ex.Message);
+                _boot?.SetStatus("XRTAK ERROR", ex.Message);
             }
         }
 
@@ -88,7 +89,7 @@ namespace TakXr.Core
             catch (System.Exception ex)
             {
                 Debug.LogError($"[TakXr] WireSystems: {ex}");
-                _boot?.SetStatus("TAKXR ERROR", ex.ToString());
+                _boot?.SetStatus("XRTAK ERROR", ex.ToString());
                 yield break;
             }
 
@@ -119,7 +120,7 @@ namespace TakXr.Core
                 if (_terrain != null)
                 {
                     _terrain.Configure(config);
-                    _boot.SetStatus("TAKXR", config.showMap
+                    _boot.SetStatus("XRTAK", config.showMap
                         ? "Loading Google Photorealistic 3D Tiles + DEM…"
                         : "Loading 3D terrain (DEM + Google Hybrid)…");
                 }
@@ -333,6 +334,36 @@ namespace TakXr.Core
             _loco.FitWorldPoints(pts);
         }
 
+        static void RequestAndroidXrPermissions()
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                string[] perms =
+                {
+                    "android.permission.HAND_TRACKING",
+                    "android.permission.EYE_TRACKING_FINE",
+                    "android.permission.EYE_TRACKING_COARSE",
+                };
+                var missing = new System.Collections.Generic.List<string>();
+                foreach (var p in perms)
+                {
+                    if (!UnityEngine.Android.Permission.HasUserAuthorizedPermission(p))
+                        missing.Add(p);
+                }
+                if (missing.Count > 0)
+                {
+                    Debug.Log("[TakXr] Requesting Android XR runtime permissions: " + string.Join(", ", missing));
+                    UnityEngine.Android.Permission.RequestUserPermissions(missing.ToArray());
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[TakXr] RequestAndroidXrPermissions: " + ex.Message);
+            }
+#endif
+        }
+
         static void EnsureLighting()
         {
 #if UNITY_2023_1_OR_NEWER
@@ -357,6 +388,55 @@ namespace TakXr.Core
             _world.ApplyInitialOverview(_cam.transform, 160f, 50f);
             _world.OrientNorth(_cam.transform);
             _loco?.RestoreSavedPitch();
+        }
+
+        /// <summary>
+        /// Force the cleanest practical XR text/geometry AA on device. Android ships
+        /// with a mid quality tier that can leave TextMesh edges soft; URP MSAA 4x +
+        /// anisotropic filtering + a slight eye-texture scale keep menus and CoT
+        /// callsigns readable without needing TextMeshPro in the build.
+        /// </summary>
+        static void ApplyXrVisualQuality()
+        {
+            QualitySettings.vSyncCount = 0;
+            QualitySettings.antiAliasing = 4;
+            QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
+            QualitySettings.globalTextureMipmapLimit = 0;
+
+            // Prefer High / Very High / Ultra when present (all carry MSAA 4x here).
+            string[] prefer = { "Ultra", "Very High", "High", "Medium" };
+            var names = QualitySettings.names;
+            bool tierSet = false;
+            for (int p = 0; p < prefer.Length && !tierSet; p++)
+            {
+                for (int i = 0; i < names.Length; i++)
+                {
+                    if (!string.Equals(names[i], prefer[p], System.StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    QualitySettings.SetQualityLevel(i, true);
+                    QualitySettings.antiAliasing = 4;
+                    QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
+                    tierSet = true;
+                    break;
+                }
+            }
+
+            try
+            {
+                // Slight supersampling sharpens world TextMesh under OpenXR without TMP.
+                UnityEngine.XR.XRSettings.eyeTextureResolutionScale = 1.15f;
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[TakXr] eyeTextureResolutionScale: " + ex.Message);
+            }
+
+            // Warm the shared crisp font atlas on the main thread before first UI draw.
+            try { _ = TakXr.UI.XrText.SharedFont; }
+            catch { /* ignore */ }
+
+            Debug.Log($"[TakXr] visual quality={QualitySettings.names[QualitySettings.GetQualityLevel()]} " +
+                      $"MSAA={QualitySettings.antiAliasing}x aniso={QualitySettings.anisotropicFiltering}");
         }
 
         IEnumerator DirectFallback()
@@ -386,7 +466,7 @@ namespace TakXr.Core
             int tiles = _terrain != null ? _terrain.LoadedCount : 0;
             string ws = _feed != null ? _feed.ConnectionState : "?";
             string follow = _follow != null && _follow.IsFollowing ? " · FOLLOW" : "";
-            _boot.SetStatus("TAKXR", $"Tracks {tracks} (shown {shown}) · WS {ws} · DEM {tiles}{follow}");
+            _boot.SetStatus("XRTAK", $"Tracks {tracks} (shown {shown}) · WS {ws} · DEM {tiles}{follow}");
         }
     }
 }

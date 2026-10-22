@@ -15,10 +15,13 @@ namespace TakXr.Cot
     /// - 3D gimbal video camera pods for video streams
     /// - 3D standing observer pawns with volumetric 3D FOV cones
     /// - 3D extruded relief meshes on 3D affiliation spheres/rings for all 2D ATAK/2525 icons
-    /// Includes constant-angular-size scaling, terrain clamping, and callsign leader-line stacking.
+    /// Includes distance LOD (full / simple pin), terrain clamping, and callsign stacking.
+    /// Callsigns use high-density TextMesh (TMP requires Essential Resources not yet in APK).
     /// </summary>
     public class CotMarkerView : MonoBehaviour
     {
+        enum MarkerLod : byte { Near = 0, Mid = 1, Far = 2 }
+
         const float AngularSize = 0.048f;
         const float MinMeters = 14f;
         // Cap so huge markers don't steal controller rays meant for the toolbar.
@@ -29,11 +32,20 @@ namespace TakXr.Cot
         const float LabelAngular = 0.024f;       // ~1.4° of visual height at mid/far
         const float LabelNearAngular = 0.012f;   // tighter when camDist is small
         const float LabelNearSoftM = 70f;        // blend toward near angular below this
-        const float LabelMinCharSize = 0.016f;   // lower floor — near clamp shrinks further
+        const float LabelMinCharSize = 0.016f;
         const float LabelNearMaxWorldH = 16f;    // ceiling inside the near zone only
         const float LabelAbsMaxWorldH = 300f;    // sanity ceiling (only binds beyond 12.5 km)
-        const float LabelFontSize = 256f;        // match XrText.CrispFontSize raster
+        const float LabelFontSize = 384f;        // match XrText.CrispFontSize raster
         const float LabelHover3D = 0.52f;        // fraction of marker meters above 3D center
+
+        // Distance LOD — mid/far collapse multi-mesh balls to a single instanced pin.
+        // Air tracks keep a recognizable air silhouette farther than ground pins.
+        const float LodMidMeters = 2500f;
+        const float LodFarMeters = 12000f;
+        const float LodMidPriorityMeters = 8000f;   // airborne / emergency / selected
+        const float LodFarPriorityMeters = 25000f;
+        const int GroundRayEveryN = 24;
+        const int OcclusionEveryN = 18;
 
         // Crowded markers (several CoTs at nearly the same spot) shrink so the
         // pile stays readable; labels keep stacking with leader lines.
@@ -42,6 +54,9 @@ namespace TakXr.Cot
         // Terrain clamp: keep every 3D object above the rendered surface.
         const float GroundLiftSampledM = 12f;
         const float GroundLiftFallbackM = 6f;
+
+        /// <summary>When set, that UID stays on the near LOD tier longer.</summary>
+        public static string ForceNearLodUid;
 
         /// <summary>Global marker ICON size multiplier from settings (default 1).</summary>
         public static float ScaleMultiplier { get; set; } = 1f;
@@ -81,6 +96,9 @@ namespace TakXr.Cot
         BoxCollider _hit;
         Texture2D _runtimeTex;
         Coroutine _iconLoad;
+        AppConfig _boundConfig;
+        MarkerLod _lodTier = MarkerLod.Near;
+        bool _lodPinActive;
         bool _isVideo;
         bool _isAirborne;
         bool _isEmergency;
@@ -123,7 +141,8 @@ namespace TakXr.Cot
         {
             Uid = cot.uid;
             Cot = cot;
-            _occlusionTickOffset = Mathf.Abs((cot.uid ?? "").GetHashCode()) % 6;
+            _boundConfig = config;
+            _occlusionTickOffset = Mathf.Abs((cot.uid ?? "").GetHashCode()) % OcclusionEveryN;
             if (config != null)
             {
                 XrayOccludedEnabled = config.xrayOccludedCots;
@@ -138,9 +157,54 @@ namespace TakXr.Cot
             UpdateAngularScale(cameraTransform);
         }
 
+        /// <summary>Reset transient state before returning this marker to the layer pool.</summary>
+        public void PrepareForPool()
+        {
+            if (_iconLoad != null)
+            {
+                StopCoroutine(_iconLoad);
+                _iconLoad = null;
+            }
+            ClearLabelAvoidanceOffset();
+            SetCrowded(false);
+            Uid = null;
+            Cot = null;
+            _boundConfig = null;
+            _modelKey = null;
+            _lodTier = MarkerLod.Near;
+            _lodPinActive = false;
+            _xrayApplied = false;
+            _lastXrayAlphaQuant = -1;
+            _isOccludedBehindTerrain = false;
+            _groundLocalY = float.NegativeInfinity;
+            _groundSampled = false;
+            _haveClampGeo = false;
+            if (_modelInstance != null)
+            {
+                Destroy(_modelInstance);
+                _modelInstance = null;
+            }
+            _modelRenderers.Clear();
+            _modelOrigMats.Clear();
+            if (_label != null)
+            {
+                _label.text = "";
+                _label.gameObject.SetActive(false);
+            }
+            if (_leader != null) _leader.enabled = false;
+            if (_altDropLine != null) _altDropLine.enabled = false;
+            if (_emergencyHalo != null) _emergencyHalo.gameObject.SetActive(false);
+            if (_runtimeTex != null)
+            {
+                Destroy(_runtimeTex);
+                _runtimeTex = null;
+            }
+        }
+
         public void Refresh(NormalizedCot cot, AppConfig config)
         {
             Cot = cot;
+            _boundConfig = config;
             gameObject.name = $"COT:{cot.Callsign}";
 
             // ALL classification goes through CotClassifier — the branch order is
@@ -148,29 +212,50 @@ namespace TakXr.Cot
             var kind = CotClassifier.Classify(cot);
             LabelPriority = ComputeLabelPriority(kind);
             _isVideo = kind == MarkerKind.Video;
-            _isAirborne = kind == MarkerKind.AircraftFixed || kind == MarkerKind.AircraftRotary || cot.IsAirborne;
+            _isAirborne = kind == MarkerKind.AircraftFixed || kind == MarkerKind.AircraftRotary
+                          || kind == MarkerKind.AircraftDrone || cot.IsAirborne;
             _isEmergency = cot.IsEmergency;
 
-            if (_label != null)
-            {
-                string text = cot.Callsign ?? cot.uid;
-                if (_isEmergency) text = "(!) " + text;
-                _label.text = text;
-                _label.fontSize = (int)LabelFontSize;
-                _label.color = _isEmergency
-                    ? new Color(1f, 0.35f, 0.35f, 1f)
-                    : new Color(1f, 1f, 0.95f, 0.98f);
-                XrText.Sharpen(_label);
-                ForceFontBilinear(_label);
-                if (_labelShadow != null)
-                {
-                    _labelShadow.text = _label.text;
-                    _labelShadow.fontSize = _label.fontSize;
-                }
-            }
+            ApplyCallsignText(cot);
 
             if (_iconLoad != null) StopCoroutine(_iconLoad);
 
+            // LOD pin stays until UpdateAngularScale promotes back to Near.
+            if (_lodPinActive && _lodTier != MarkerLod.Near)
+            {
+                ApplySimpleLodPin();
+                UpdateEmergencyHalo();
+                return;
+            }
+
+            ApplyFullModel(cot, config, kind);
+            UpdateEmergencyHalo();
+        }
+
+        void ApplyCallsignText(NormalizedCot cot)
+        {
+            if (_label == null) return;
+            string text = cot.Callsign ?? cot.uid;
+            if (_isEmergency) text = "(!) " + text;
+            _label.text = text;
+            _label.fontSize = (int)LabelFontSize;
+            _label.color = _isEmergency
+                ? new Color(1f, 0.35f, 0.35f, 1f)
+                : new Color(1f, 1f, 0.95f, 0.98f);
+            XrText.Sharpen(_label);
+            ForceFontBilinear(_label);
+            if (_labelShadow != null)
+            {
+                _labelShadow.text = _label.text;
+                _labelShadow.fontSize = _label.fontSize;
+            }
+            if (!_label.gameObject.activeSelf)
+                _label.gameObject.SetActive(true);
+        }
+
+        void ApplyFullModel(NormalizedCot cot, AppConfig config, MarkerKind kind)
+        {
+            _lodPinActive = false;
             switch (kind)
             {
                 case MarkerKind.Observer:
@@ -190,11 +275,9 @@ namespace TakXr.Cot
                     break;
 
                 case MarkerKind.AircraftFixed:
-                    ApplyAircraft3D(cot, rotary: false);
-                    break;
-
                 case MarkerKind.AircraftRotary:
-                    ApplyAircraft3D(cot, rotary: true);
+                case MarkerKind.AircraftDrone:
+                    ApplyAircraft3D(cot);
                     break;
 
                 case MarkerKind.LocalIcon:
@@ -207,12 +290,72 @@ namespace TakXr.Cot
                     ApplyRemoteIcon3D(cot, config, color);
                     break;
 
-                default: // MarkerKind.Dot
-                    ApplyFallbackBall3D(cot);
+                default: // MarkerKind.Dot — 2525 affiliation frames (circle/diamond/square)
+                    if (!TryApplyAffiliationFrame3D(cot))
+                        ApplyFallbackBall3D(cot);
                     break;
             }
+        }
 
-            UpdateEmergencyHalo();
+        void ApplySimpleLodPin()
+        {
+            var color = UnitDotColor(Cot);
+            string hex = ColorUtility.ToHtmlStringRGB(color);
+            float pinScale = _lodTier == MarkerLod.Far ? 0.38f : 0.55f;
+            _lodPinActive = true;
+
+            if (_isAirborne && CotClassifier.TryGetAirframeStyle(Cot, out var airStyle))
+            {
+                bool rotary = airStyle == CotClassifier.AirframeStyle.Rotary;
+                bool drone = airStyle == CotClassifier.AirframeStyle.Drone;
+                float course = Cot?.detail?.track != null && !float.IsNaN(Cot.detail.track.course)
+                    ? Cot.detail.track.course : 0f;
+                _worldOriented3D = true;
+                _headingDeg = course;
+                string key = $"lodair:{airStyle}:{hex}:{(_lodTier == MarkerLod.Far ? "f" : "m")}";
+                ReplaceModel(key, () => ModelGo(Cot3dModelFactory.BuildSimpleAirPin(null, color, rotary, drone)));
+                return;
+            }
+
+            _worldOriented3D = false;
+            _headingDeg = 0f;
+            string gKey = $"lodpin:{hex}:{pinScale:0.00}";
+            ReplaceModel(gKey, () => ModelGo(Cot3dModelFactory.BuildSimplePin(null, color, pinScale)));
+        }
+
+        MarkerLod ComputeLod(float dist)
+        {
+            bool priority = _isAirborne || _isEmergency ||
+                            (!string.IsNullOrEmpty(ForceNearLodUid) && ForceNearLodUid == Uid);
+            float mid = priority ? LodMidPriorityMeters : LodMidMeters;
+            float far = priority ? LodFarPriorityMeters : LodFarMeters;
+            if (dist < mid) return MarkerLod.Near;
+            if (dist < far) return MarkerLod.Mid;
+            return MarkerLod.Far;
+        }
+
+        void ApplyLodIfNeeded(float dist)
+        {
+            var tier = ComputeLod(dist);
+            if (tier == _lodTier && _modelInstance != null) return;
+            var prev = _lodTier;
+            _lodTier = tier;
+            if (Cot == null) return;
+
+            if (tier == MarkerLod.Near)
+            {
+                if (prev != MarkerLod.Near || _lodPinActive)
+                {
+                    _lodPinActive = false;
+                    ApplyFullModel(Cot, _boundConfig, CotClassifier.Classify(Cot));
+                    UpdateEmergencyHalo();
+                }
+            }
+            else
+            {
+                ApplySimpleLodPin();
+                UpdateEmergencyHalo();
+            }
         }
 
         static GameObject ModelGo(Transform built) => built != null ? built.gameObject : null;
@@ -275,7 +418,7 @@ namespace TakXr.Cot
             ReplaceModel(key, () => ModelGo(Cot3dModelFactory.BuildUnitBall(null, color, hasCourse ? 0f : float.NaN)));
         }
 
-        void ApplyAircraft3D(NormalizedCot cot, bool rotary)
+        void ApplyAircraft3D(NormalizedCot cot)
         {
             var color = UnitDotColor(cot);
             float course = cot.detail?.track != null && !float.IsNaN(cot.detail.track.course)
@@ -284,10 +427,54 @@ namespace TakXr.Cot
             _worldOriented3D = true;
             _headingDeg = course;
             string hex = ColorUtility.ToHtmlStringRGB(color);
-            string key = (rotary ? "heli3d:" : "plane3d:") + hex;
-            ReplaceModel(key, () => ModelGo(rotary
-                ? Cot3dModelFactory.BuildRotaryHelicopter(null, color, float.NaN)
-                : Cot3dModelFactory.BuildFixedWingAirplane(null, color, float.NaN)));
+            if (!CotClassifier.TryGetAirframeStyle(cot, out var style))
+                style = CotClassifier.AirframeStyle.MilitaryFixed;
+            string key = $"air3d:{style}:{hex}";
+            ReplaceModel(key, () =>
+            {
+                switch (style)
+                {
+                    case CotClassifier.AirframeStyle.Drone:
+                        return ModelGo(Cot3dModelFactory.BuildQuadcopterDrone(null, color, float.NaN));
+                    case CotClassifier.AirframeStyle.Rotary:
+                        return ModelGo(Cot3dModelFactory.BuildRotaryHelicopter(null, color, float.NaN));
+                    case CotClassifier.AirframeStyle.CivilianFixed:
+                        return ModelGo(Cot3dModelFactory.BuildCivilianAirplane(null, color, float.NaN));
+                    default:
+                        return ModelGo(Cot3dModelFactory.BuildFixedWingAirplane(null, color, float.NaN));
+                }
+            });
+        }
+
+        /// <summary>
+        /// TDOT / waypoint / alert style markers: extrude Default iconset affiliation
+        /// frames (friendly circle, hostile diamond, neutral square, unknown).
+        /// </summary>
+        bool TryApplyAffiliationFrame3D(NormalizedCot cot)
+        {
+            // Keep true SA ground units as team balls — only non-unit markers get frames.
+            if (IsUnitCot(cot) && CotClassifier.IsTeamMemberCot(cot))
+                return false;
+            var tex = IconResolver.ResolveTexture(cot);
+            if (tex == null) return false;
+            var color = ParseColor(cot.detail?.markerColor, UnitDotColor(cot));
+            string aff = IconResolverAffiliationKey(cot);
+            string key = "affframe3d:" + aff + ":" + ColorUtility.ToHtmlStringRGB(color) + ":" + tex.GetInstanceID();
+            _worldOriented3D = false;
+            _headingDeg = 0f;
+            ReplaceModel(key, () => ModelGo(
+                Cot3dModelFactory.BuildExtrudedIconObject(null, tex, color, float.NaN, includeBaseBall: false)));
+            return true;
+        }
+
+        static string IconResolverAffiliationKey(NormalizedCot cot)
+        {
+            if (cot?.type == null || cot.type.Length < 3) return "u";
+            char a = cot.type.Length >= 3 ? cot.type[2] : 'u';
+            // type is a-f-G… so affiliation is index 2 of "a-f-G" split → parts[1]
+            var parts = cot.type.Split('-');
+            if (parts.Length >= 2) return parts[1].ToLowerInvariant();
+            return a.ToString().ToLowerInvariant();
         }
 
         void ApplyVideoPod3D(NormalizedCot cot)
@@ -406,7 +593,8 @@ namespace TakXr.Cot
                 case MarkerKind.Video: return 400;
                 case MarkerKind.Dcfs: return 300;
                 case MarkerKind.AircraftFixed:
-                case MarkerKind.AircraftRotary: return 200;
+                case MarkerKind.AircraftRotary:
+                case MarkerKind.AircraftDrone: return 200;
                 default: return 100;
             }
         }
@@ -457,7 +645,7 @@ namespace TakXr.Cot
                 if (away.sqrMagnitude > 1e-8f)
                     _billboardRoot.rotation = Quaternion.LookRotation(away.normalized, Vector3.up);
             }
-            if (_label != null)
+            if (_label != null && _label.gameObject.activeSelf)
             {
                 // Upright billboard — always face camera, keep world up.
                 var la = _label.transform.position - cam.position;
@@ -519,9 +707,13 @@ namespace TakXr.Cot
                 }
             }
 
+            // Skip mesh ground probes for far LOD pins — DEM sample above is enough.
+            if (_lodTier == MarkerLod.Far) return;
+
             // 2. Also sample downward against any 3D photogrammetry / Google 3D Tiles meshes
-            // (every 12 frames per marker so CoTs ride on top of 3D buildings and bridges).
-            if (!_isAirborne && transform.parent != null && ((Time.frameCount + _occlusionTickOffset) % 12 == 0))
+            // (staggered so CoTs ride on top of 3D buildings and bridges).
+            if (!_isAirborne && transform.parent != null &&
+                ((Time.frameCount + _occlusionTickOffset) % GroundRayEveryN) == 0)
             {
                 var topWorld = transform.position + Vector3.up * 250f;
                 var hits = Physics.RaycastAll(topWorld, Vector3.down, 600f, ~0, QueryTriggerInteraction.Ignore);
@@ -568,16 +760,19 @@ namespace TakXr.Cot
                 : 8f;
 
         public bool HasLabel =>
-            _label != null && !string.IsNullOrEmpty(_label.text);
+            _label != null && _label.gameObject.activeSelf && !string.IsNullOrEmpty(_label.text);
 
         public void UpdateAngularScale(Transform cam)
         {
             if (cam == null || _billboardRoot == null) return;
-            ResampleGroundIfNeeded();
             float dist = Vector3.Distance(cam.position, transform.position);
+            ApplyLodIfNeeded(dist);
+            ResampleGroundIfNeeded();
             float mul = Mathf.Clamp(ScaleMultiplier, 0.5f, 5f);
             float meters = Mathf.Clamp(dist * AngularSize * mul, MinMeters * mul, MaxMeters * mul);
             meters *= _clusterScale; // crowded groups render smaller (~60%)
+            if (_lodTier == MarkerLod.Far)
+                meters *= 0.72f;
             _lastMarkerMeters = meters;
 
             // Uniform 3D scale on all axes so 3D spheres, airplanes, helicopters, and
@@ -614,30 +809,39 @@ namespace TakXr.Cot
 
             if (_label != null)
             {
-                float hover = meters * LabelHover3D;
-                _label.transform.localPosition =
-                    new Vector3(0f, hover, 0f) + _labelAvoidOffset;
+                bool wantLabel = _lodTier != MarkerLod.Far &&
+                                 (!_isOccludedBehindTerrain ||
+                                  (XrayOccludedEnabled && dist <= XrayMaxDistanceMeters));
+                if (_label.gameObject.activeSelf != wantLabel)
+                    _label.gameObject.SetActive(wantLabel);
 
-                float lmul = Mathf.Clamp(LabelScaleMultiplier, 0.5f, 5f);
-                _label.fontSize = (int)LabelFontSize;
-                float ang = LabelAngular;
-                if (dist < LabelNearSoftM)
+                if (wantLabel)
                 {
-                    float t = Mathf.Clamp01(dist / LabelNearSoftM);
-                    t = t * t * (3f - 2f * t);
-                    ang = Mathf.Lerp(LabelNearAngular, LabelAngular, t);
+                    float hover = meters * LabelHover3D;
+                    _label.transform.localPosition =
+                        new Vector3(0f, hover, 0f) + _labelAvoidOffset;
+
+                    float lmul = Mathf.Clamp(LabelScaleMultiplier, 0.5f, 5f);
+                    _label.fontSize = (int)LabelFontSize;
+                    float ang = LabelAngular;
+                    if (dist < LabelNearSoftM)
+                    {
+                        float t = Mathf.Clamp01(dist / LabelNearSoftM);
+                        t = t * t * (3f - 2f * t);
+                        ang = Mathf.Lerp(LabelNearAngular, LabelAngular, t);
+                    }
+                    float minH = LabelMinCharSize * LabelFontSize * 0.1f;
+                    if (dist < LabelNearSoftM)
+                        minH *= Mathf.Lerp(0.35f, 1f, Mathf.Clamp01(dist / LabelNearSoftM));
+                    float maxH = Mathf.Max(LabelNearMaxWorldH * lmul, dist * ang * lmul);
+                    if (dist < LabelNearSoftM)
+                        maxH = Mathf.Lerp(6f * lmul, LabelNearMaxWorldH * lmul, Mathf.Clamp01(dist / LabelNearSoftM));
+                    maxH = Mathf.Min(maxH, LabelAbsMaxWorldH * lmul);
+                    float worldH = Mathf.Clamp(dist * ang * lmul, minH * lmul, maxH);
+                    _label.characterSize = Mathf.Max(0.004f, worldH / (LabelFontSize * 0.1f));
+                    ForceFontBilinear(_label);
+                    UpdateLabelDecorations();
                 }
-                float minH = LabelMinCharSize * LabelFontSize * 0.1f;
-                if (dist < LabelNearSoftM)
-                    minH *= Mathf.Lerp(0.35f, 1f, Mathf.Clamp01(dist / LabelNearSoftM));
-                float maxH = Mathf.Max(LabelNearMaxWorldH * lmul, dist * ang * lmul);
-                if (dist < LabelNearSoftM)
-                    maxH = Mathf.Lerp(6f * lmul, LabelNearMaxWorldH * lmul, Mathf.Clamp01(dist / LabelNearSoftM));
-                maxH = Mathf.Min(maxH, LabelAbsMaxWorldH * lmul);
-                float worldH = Mathf.Clamp(dist * ang * lmul, minH * lmul, maxH);
-                _label.characterSize = Mathf.Max(0.004f, worldH / (LabelFontSize * 0.1f));
-                ForceFontBilinear(_label);
-                UpdateLabelDecorations();
             }
             UpdateLeaderLine();
             UpdateAltitudeDropLine();
@@ -645,7 +849,15 @@ namespace TakXr.Cot
 
         void UpdateOcclusionXray(Transform cam, float dist)
         {
-            if (((Time.frameCount + _occlusionTickOffset) % 6) == 0)
+            // Far pins skip expensive occlusion probes.
+            if (_lodTier == MarkerLod.Far)
+            {
+                if (_xrayApplied) RestoreOpaqueMaterials();
+                _isOccludedBehindTerrain = false;
+                return;
+            }
+
+            if (((Time.frameCount + _occlusionTickOffset) % OcclusionEveryN) == 0)
             {
                 _isOccludedBehindTerrain = CheckIfOccludedFromCamera(cam, dist);
             }
@@ -673,28 +885,26 @@ namespace TakXr.Cot
             }
             else if (_xrayApplied)
             {
-                _xrayApplied = false;
-                _lastXrayAlphaQuant = -1;
-                for (int i = 0; i < _modelRenderers.Count; i++)
-                {
-                    var r = _modelRenderers[i];
-                    if (r == null) continue;
-                    r.sharedMaterial = _modelOrigMats[i];
-                }
+                RestoreOpaqueMaterials();
             }
 
-            if (_label != null)
+            if (_label != null && _label.gameObject.activeSelf)
             {
-                // Hide callsigns of occluded CoTs that are beyond the reasonable X-Ray distance.
-                bool showLabel = !_isOccludedBehindTerrain || (XrayOccludedEnabled && withinReasonableDist);
-                if (_label.gameObject.activeSelf != showLabel)
-                    _label.gameObject.SetActive(showLabel);
-                if (showLabel)
-                {
-                    float lblAlpha = _isOccludedBehindTerrain ? 0.65f : 0.98f;
-                    var c = _isEmergency ? new Color(1f, 0.35f, 0.35f, lblAlpha) : new Color(1f, 1f, 0.95f, lblAlpha);
-                    _label.color = c;
-                }
+                float lblAlpha = _isOccludedBehindTerrain ? 0.65f : 0.98f;
+                var c = _isEmergency ? new Color(1f, 0.35f, 0.35f, lblAlpha) : new Color(1f, 1f, 0.95f, lblAlpha);
+                _label.color = c;
+            }
+        }
+
+        void RestoreOpaqueMaterials()
+        {
+            _xrayApplied = false;
+            _lastXrayAlphaQuant = -1;
+            for (int i = 0; i < _modelRenderers.Count; i++)
+            {
+                var r = _modelRenderers[i];
+                if (r == null) continue;
+                r.sharedMaterial = _modelOrigMats[i];
             }
         }
 
@@ -746,13 +956,14 @@ namespace TakXr.Cot
 
         void UpdateLabelDecorations()
         {
+            if (_label == null) return;
             float h = _label.characterSize * _label.fontSize * 0.1f;
 
             if (_labelShadow != null)
             {
                 _labelShadow.fontSize = _label.fontSize;
                 _labelShadow.characterSize = _label.characterSize;
-                _labelShadow.transform.localPosition = new Vector3(h * 0.05f, -h * 0.05f, h * 0.03f);
+                _labelShadow.transform.localPosition = new Vector3(h * 0.06f, -h * 0.07f, h * 0.03f);
             }
 
             if (_labelPlate != null && _labelRend != null)
@@ -762,9 +973,9 @@ namespace TakXr.Cot
                 {
                     _labelPlate.gameObject.SetActive(true);
                     _labelPlate.localPosition =
-                        new Vector3(b.center.x, b.center.y, h * 0.06f);
+                        new Vector3(b.center.x, b.center.y, h * 0.08f);
                     _labelPlate.localScale =
-                        new Vector3(b.size.x + h * 0.5f, b.size.y + h * 0.3f, 1f);
+                        new Vector3(b.size.x + h * 0.7f, b.size.y + h * 0.45f, 1f);
                 }
                 else
                 {
@@ -776,7 +987,7 @@ namespace TakXr.Cot
         void UpdateLeaderLine()
         {
             if (_leader == null || _label == null) return;
-            bool show = _labelAvoidOffset.sqrMagnitude > 0.5f;
+            bool show = _label.gameObject.activeSelf && _labelAvoidOffset.sqrMagnitude > 0.5f;
             _leader.enabled = show;
             if (!show) return;
             var pin = MarkerPinWorld + Vector3.up * Mathf.Max(0.4f, _lastMarkerMeters * 0.18f);
@@ -877,10 +1088,11 @@ namespace TakXr.Cot
             _label.alignment = TextAlignment.Center;
             _label.fontSize = (int)LabelFontSize;
             _label.characterSize = LabelMinCharSize;
-            _label.color = new Color(1f, 1f, 0.95f, 0.98f);
+            _label.color = new Color(1f, 1f, 0.98f, 1f);
             _label.font = XrText.SharedFont
                           ?? Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
                           ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+            XrText.Sharpen(_label);
             ForceFontBilinear(_label);
             _labelRend = labelGo.GetComponent<MeshRenderer>();
             if (_labelRend != null)
@@ -897,7 +1109,7 @@ namespace TakXr.Cot
             _labelShadow.alignment = _label.alignment;
             _labelShadow.fontSize = _label.fontSize;
             _labelShadow.characterSize = _label.characterSize;
-            _labelShadow.color = new Color(0f, 0f, 0f, 0.9f);
+            _labelShadow.color = new Color(0f, 0f, 0f, 0.95f);
             _labelShadow.font = _label.font;
             var sr = shadowGo.GetComponent<MeshRenderer>();
             if (sr != null)
@@ -920,7 +1132,7 @@ namespace TakXr.Cot
                 _labelPlateRend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 _labelPlateRend.receiveShadows = false;
                 var pm = _labelPlateRend.material;
-                var plateColor = new Color(0.02f, 0.03f, 0.05f, 0.62f);
+                var plateColor = new Color(0.01f, 0.02f, 0.04f, 0.78f);
                 if (pm.HasProperty("_BaseColor")) pm.SetColor("_BaseColor", plateColor);
                 if (pm.HasProperty("_Color")) pm.SetColor("_Color", plateColor);
                 pm.renderQueue = 3000;
@@ -928,6 +1140,25 @@ namespace TakXr.Cot
             plateGo.SetActive(false);
 
             EnsureLeaderLine();
+        }
+
+        static void ForceFontBilinear(TextMesh tm)
+        {
+            if (tm?.font == null) return;
+            XrText.ForceCrispFiltering(tm.font);
+        }
+
+        static Material GetUnlitMaterial()
+        {
+            if (_sharedUnlit != null) return _sharedUnlit;
+            var sh = Shader.Find("Sprites/Default")
+                     ?? Shader.Find("Universal Render Pipeline/Unlit")
+                     ?? Shader.Find("Unlit/Transparent")
+                     ?? Shader.Find("Unlit/Color");
+            _sharedUnlit = sh != null ? new Material(sh) : null;
+            if (_sharedUnlit != null && _sharedUnlit.HasProperty("_Cull"))
+                _sharedUnlit.SetFloat("_Cull", 0f);
+            return _sharedUnlit;
         }
 
         void EnsureLeaderLine()
@@ -955,25 +1186,6 @@ namespace TakXr.Cot
             _leader.startColor = c0;
             _leader.endColor = c1;
             _leader.enabled = false;
-        }
-
-        static void ForceFontBilinear(TextMesh tm)
-        {
-            if (tm?.font?.material?.mainTexture == null) return;
-            tm.font.material.mainTexture.filterMode = FilterMode.Bilinear;
-        }
-
-        static Material GetUnlitMaterial()
-        {
-            if (_sharedUnlit != null) return _sharedUnlit;
-            var sh = Shader.Find("Sprites/Default")
-                     ?? Shader.Find("Universal Render Pipeline/Unlit")
-                     ?? Shader.Find("Unlit/Transparent")
-                     ?? Shader.Find("Unlit/Color");
-            _sharedUnlit = sh != null ? new Material(sh) : null;
-            if (_sharedUnlit != null && _sharedUnlit.HasProperty("_Cull"))
-                _sharedUnlit.SetFloat("_Cull", 0f);
-            return _sharedUnlit;
         }
 
         /// <summary>

@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 using TakXr.Core;
@@ -98,31 +99,23 @@ namespace TakXr.Cot
 
         IEnumerator LoadP12Coroutine()
         {
-            // Prefer bytes already loaded by the CoT client when available.
-            if (_direct != null && _direct.P12Bytes != null && _direct.P12Bytes.Length > 0)
-            {
-                _p12 = _direct.P12Bytes;
-                _p12Password = _direct.P12Password;
-                TryInitMarti("direct-client");
-                yield break;
-            }
-
             var active = TakServerDirectory.GetActive(TakServerDirectory.LoadOrSeed(_config));
-            yield return TakCertStore.LoadP12Routine(_config, active?.id, (bytes, pwd) =>
-            {
-                _p12 = bytes;
-                _p12Password = pwd;
-            });
+            TakCertStore.CertMaterial loaded = null;
+            yield return TakCertStore.LoadRoutine(_config, active?.id, mat => loaded = mat);
 
-            if (_p12 == null || _p12.Length == 0)
+            if (loaded == null || loaded.Certificate == null)
             {
                 _p12LoadFailed = true;
-                LastError = "Marti cert missing";
+                LastError = loaded != null && !string.IsNullOrEmpty(loaded.Error)
+                    ? loaded.Error
+                    : "Marti cert missing — Enroll this server first";
                 Debug.LogWarning("[TakLayers] " + LastError);
                 yield break;
             }
 
-            TryInitMarti("cert-store");
+            _p12 = loaded.P12;
+            _p12Password = loaded.Password;
+            TryInitMarti(loaded.Certificate, _p12 != null ? "cert-store" : "enrolled-key");
         }
 
         void TryInitMarti(string source)
@@ -133,15 +126,30 @@ namespace TakXr.Cot
                 string pwd = !string.IsNullOrEmpty(_p12Password)
                     ? _p12Password
                     : (_direct != null ? _direct.P12Password : _config.takClientP12Password);
-                _marti = new TakMartiClient(_config.takHost, _config.takMartiPort, _p12, pwd);
-                LastError = null;
-                Debug.Log($"[TakLayers] Marti client ready ({_config.takHost}:{_config.takMartiPort}, uid {_clientUid}, cert={source}, {_p12.Length} B)");
+                TryInitMarti(TakCertStore.CreateCert(_p12, pwd), source);
             }
             catch (Exception ex)
             {
                 _p12LoadFailed = true;
-                LastError = ex.Message;
-                Debug.LogError("[TakLayers] Marti init failed: " + ex.Message);
+                LastError = TakCertStore.DescribeCertError(ex);
+                Debug.LogError("[TakLayers] Marti init failed: " + LastError);
+            }
+        }
+
+        void TryInitMarti(X509Certificate2 cert, string source)
+        {
+            if (_marti != null || _config == null || cert == null) return;
+            try
+            {
+                _marti = new TakMartiClient(_config.takHost, _config.takMartiPort, cert);
+                LastError = null;
+                Debug.Log($"[TakLayers] Marti client ready ({_config.takHost}:{_config.takMartiPort}, uid {_clientUid}, cert={source})");
+            }
+            catch (Exception ex)
+            {
+                _p12LoadFailed = true;
+                LastError = TakCertStore.DescribeCertError(ex);
+                Debug.LogError("[TakLayers] Marti init failed: " + LastError);
             }
         }
 

@@ -183,14 +183,34 @@ namespace TakXr.Cot
 
         bool TryBuildSelectRay(int handIndex, Vector3 tip, out Ray ray)
         {
+            // When operating without physical controllers, if Eye Gaze is directly on a CoT marker
+            // or panel button, prefer the Eye Gaze ray so "Look at CoT + Pinch" opens its radial coin menu!
+            if (!XrHandPinchInput.IsUsingPhysicalControllers() &&
+                XrHandPinchInput.TryGetEyeGazeRay(out var eyeOrigin, out var eyeFwd, out _))
+            {
+                var eyeRay = new Ray(eyeOrigin, eyeFwd);
+                if ((radialMenu != null && radialMenu.IsVisible) ||
+                    (infoPanel != null && infoPanel.IsVisible) ||
+                    (cotLayer != null && (cotLayer.TryRaycastSelect(eyeRay, 8000f, out _) ||
+                                          cotLayer.TrySphereSelect(eyeRay, 8000f, 35f, out _))))
+                {
+                    ray = eyeRay;
+                    return true;
+                }
+            }
+
             if (XrHandPinchInput.TryGetAim(handIndex, out var origin, out var forward))
             {
                 ray = new Ray(origin, forward);
                 return true;
             }
+            if (XrHandPinchInput.TryGetEyeGazeRay(out var fallbackOrigin, out var fallbackFwd, out _))
+            {
+                ray = new Ray(fallbackOrigin, fallbackFwd);
+                return true;
+            }
             if (cameraTransform != null)
             {
-                // Gaze + trigger fallback when controller aim pose is missing.
                 ray = new Ray(cameraTransform.position, cameraTransform.forward);
                 return true;
             }
@@ -203,6 +223,7 @@ namespace TakXr.Cot
             if (feed == null || !feed.Cots.TryGetValue(uid, out var cot) || cot == null)
                 return;
             _lastSelectedUid = uid;
+            CotMarkerView.ForceNearLodUid = uid;
             // ATAK-style: tap opens the radial coin menu; Details slice routes to the
             // info panel. Fall back to the panel when no radial menu is wired.
             if (radialMenu != null)

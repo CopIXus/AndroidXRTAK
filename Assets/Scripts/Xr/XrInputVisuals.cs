@@ -3,7 +3,8 @@ using UnityEngine;
 namespace TakXr.Xr
 {
     /// <summary>
-    /// Controller/hand rays follow true pointer pose so users can aim at CoTs and UI.
+    /// Controller/hand rays + subtle Eye Gaze reticle so users can aim at CoTs and UI
+    /// smoothly whether holding controllers or using bare hands + eyes.
     /// </summary>
     public class XrInputVisuals : MonoBehaviour
     {
@@ -15,6 +16,7 @@ namespace TakXr.Xr
         LineRenderer _rightRay;
         Transform _leftTip;
         Transform _rightTip;
+        Transform _eyeReticle;
 
         public static XrInputVisuals Ensure(Transform parent)
         {
@@ -31,6 +33,15 @@ namespace TakXr.Xr
             _right = MakeHand("RightHand", new Color(1f, 0.63f, 0.38f), out _rightTip);
             _leftRay = MakeRay(_left, new Color(0.43f, 0.78f, 1f, 0.85f));
             _rightRay = MakeRay(_right, new Color(1f, 0.63f, 0.38f, 0.85f));
+
+            var eyeGo = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            eyeGo.name = "EyeGazeReticle";
+            eyeGo.transform.SetParent(transform, false);
+            eyeGo.transform.localScale = Vector3.one * 0.011f;
+            Object.Destroy(eyeGo.GetComponent<Collider>());
+            Tint(eyeGo, new Color(0.25f, 0.95f, 1f, 0.92f));
+            _eyeReticle = eyeGo.transform;
+            _eyeReticle.gameObject.SetActive(false);
         }
 
         Transform MakeHand(string name, Color color, out Transform tip)
@@ -91,18 +102,53 @@ namespace TakXr.Xr
             {
                 try { r.sharedMaterial.color = c; } catch { /* ignore */ }
             }
+            r.sharedMaterial.renderQueue = 3150;
         }
 
         void LateUpdate()
         {
             UpdateHand(0, _left, _leftRay, _leftTip);
             UpdateHand(1, _right, _rightRay, _rightTip);
+            UpdateEyeReticle();
+        }
+
+        void UpdateEyeReticle()
+        {
+            if (_eyeReticle == null) return;
+            if (XrHandPinchInput.IsUsingPhysicalControllers() ||
+                !XrHandPinchInput.TryGetEyeGazeRay(out var eyeOrigin, out var eyeFwd, out _))
+            {
+                _eyeReticle.gameObject.SetActive(false);
+                return;
+            }
+
+            // Show a subtle cyan hover dot when looking at any UI button or CoT in controller-free mode
+            if (Physics.Raycast(eyeOrigin, eyeFwd, out var hit, 6.5f, ~0, QueryTriggerInteraction.Collide) &&
+                hit.collider != null && hit.collider.isTrigger)
+            {
+                _eyeReticle.gameObject.SetActive(true);
+                _eyeReticle.position = hit.point - eyeFwd * 0.006f;
+                bool anyPinch = XrHandPinchInput.IsGrabbing(0) || XrHandPinchInput.IsGrabbing(1);
+                _eyeReticle.localScale = Vector3.one * (anyPinch ? 0.017f : 0.010f);
+            }
+            else
+            {
+                _eyeReticle.gameObject.SetActive(false);
+            }
         }
 
         void UpdateHand(int index, Transform hand, LineRenderer ray, Transform tip)
         {
             bool ok = XrHandPinchInput.TryGetAim(index, out var origin, out var forward);
             if (!ok)
+            {
+                hand.gameObject.SetActive(false);
+                ray.enabled = false;
+                return;
+            }
+
+            // When TryGetAim snapped to Eye Gaze (origin at camera), don't draw a laser beam out of the user's nose
+            if (Camera.main != null && Vector3.Distance(origin, Camera.main.transform.position) < 0.08f)
             {
                 hand.gameObject.SetActive(false);
                 ray.enabled = false;

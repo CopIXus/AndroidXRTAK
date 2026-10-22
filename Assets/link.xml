@@ -1,3 +1,4 @@
 <linker>
   <assembly fullname="zxing" preserve="all" />
+  <assembly fullname="BouncyCastle.Crypto" preserve="all" />
 </linker>
